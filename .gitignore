@@ -1,0 +1,27 @@
+# Binaries
+/sp
+/dist/
+*.exe
+*.out
+*.test
+
+# Go
+/vendor/
+*.prof
+coverage.out
+coverage.html
+
+# scratchpatch's own local store (never commit scratches!)
+.scratchpatch/
+scratchpatch-home/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example

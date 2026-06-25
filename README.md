@@ -25,12 +25,19 @@ sp resurrect <id>                    # changed your mind? pull it back
 
 ## Install
 
-Coming with the first tagged release (`v0.1.0`). Until then:
+No tagged release yet (`v0.1.0` is the target). Build from source — it's a single
+static binary with no runtime dependencies:
 
 ```bash
 git clone https://github.com/rwrife/scratchpatch
-cd scratchpatch && go build -o sp ./cmd/sp
+cd scratchpatch
+go build -o sp ./cmd/sp
+
+./sp version      # scratchpatch <version> + tagline
+./sp --help       # see available commands
 ```
+
+Requires Go 1.22+. Drop the `sp` binary anywhere on your `PATH`.
 
 ## Design rules
 

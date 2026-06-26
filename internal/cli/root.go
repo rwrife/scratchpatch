@@ -1,7 +1,8 @@
 // Package cli wires up the scratchpatch command tree.
 //
-// M1 keeps this intentionally tiny: a root command plus `sp version`.
-// Store, index, and lifecycle commands arrive in later milestones.
+// M1 kept this tiny (root + `sp version`); M3 adds the core create/view loop
+// (`sp new`, `sp ls`). Lifecycle commands (cat/open/rm/resurrect/reap) arrive
+// in later milestones.
 package cli
 
 import (
@@ -28,7 +29,11 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 
-	root.AddCommand(newVersionCommand())
+	root.AddCommand(
+		newVersionCommand(),
+		newNewCommand(),
+		newLsCommand(),
+	)
 
 	return root
 }

@@ -39,6 +39,24 @@ go build -o sp ./cmd/sp
 
 Requires Go 1.22+. Drop the `sp` binary anywhere on your `PATH`.
 
+## Where things live
+
+scratchpatch keeps everything in a local store. The layout:
+
+```
+$SCRATCHPATCH_HOME/            # default: ~/.local/share/scratchpatch
+├── index.json                # metadata for every scratch (the source of truth)
+├── scratches/                # live scratch files
+└── morgue/                   # soft-deleted scratches, awaiting hard-delete
+```
+
+- Set `SCRATCHPATCH_HOME` to relocate the entire store (handy for testing or
+  keeping scratches on a specific volume). Otherwise `XDG_DATA_HOME` is honored,
+  falling back to `~/.local/share/scratchpatch`.
+- `index.json` is written atomically (temp file + rename), so an interrupted
+  command can never leave a half-written index.
+- Defaults: TTL **7d**, extension **md**, morgue grace period **3d**.
+
 ## Design rules
 
 - **Never destructive in one move.** `rm`/`reap` move to the morgue; only items past the grace period are ever hard-deleted.

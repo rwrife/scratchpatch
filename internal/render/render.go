@@ -23,9 +23,14 @@ import (
 	"github.com/rwrife/scratchpatch/internal/index"
 )
 
-// columns is the table header, shared by both the colorized and plain paths so
-// they can never drift.
+// columns is the live-table header, shared by both the colorized and plain
+// paths so they can never drift.
 var columns = []string{"ID", "NAME", "AGE", "EXPIRES", "TAGS", "SIZE"}
+
+// morgueColumns is the header for `sp ls --morgue`. It swaps the EXPIRES column
+// (meaningless once a scratch is dead) for PURGES — the time until reap is
+// allowed to hard-delete the content for good.
+var morgueColumns = []string{"ID", "NAME", "DELETED", "PURGES", "TAGS", "SIZE"}
 
 // expiringSoon is the window before ExpiresAt within which a scratch is
 // considered "expiring soon" and tinted as a warning.
@@ -245,4 +250,133 @@ func humanSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// MorgueRow pairs a soft-deleted scratch with the moment it becomes eligible
+// for hard-deletion. render takes this plain data (computed by the store/config
+// layer) rather than reaching for the grace window itself, keeping the "render
+// knows nothing but how to draw" boundary intact.
+type MorgueRow struct {
+	Scratch index.Scratch
+	PurgeAt time.Time
+}
+
+// MorgueTable renders soft-deleted scratches to w: id, name, when they were
+// deleted, time-until-purge, tags, and size. As with Table, color is drawn on a
+// TTY and a plain tab-separated table is written otherwise. Rows are tinted by
+// purge proximity — amber while there's grace left, red once they're eligible
+// for reaping — mirroring the live table's fresh→expired cue.
+func MorgueTable(w io.Writer, rows []MorgueRow, now time.Time, color bool) error {
+	if len(rows) == 0 {
+		_, err := fmt.Fprintln(w, "the morgue is empty — soft-deleted scratches will appear here")
+		return err
+	}
+
+	// Stable, newest-deleted-first ordering. Fall back to CreatedAt then id so
+	// the order is deterministic even if two share a delete time.
+	ordered := make([]MorgueRow, len(rows))
+	copy(ordered, rows)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		di, dj := deletedAt(ordered[i].Scratch), deletedAt(ordered[j].Scratch)
+		if !di.Equal(dj) {
+			return di.After(dj)
+		}
+		if !ordered[i].Scratch.CreatedAt.Equal(ordered[j].Scratch.CreatedAt) {
+			return ordered[i].Scratch.CreatedAt.After(ordered[j].Scratch.CreatedAt)
+		}
+		return ordered[i].Scratch.ID < ordered[j].Scratch.ID
+	})
+
+	if color {
+		return colorMorgueTable(w, ordered, now)
+	}
+	return plainMorgueTable(w, ordered, now)
+}
+
+// morgueCells builds the six display strings for a single morgue row.
+func morgueCells(r MorgueRow, now time.Time) []string {
+	return []string{
+		r.Scratch.ID,
+		nameOrDash(r.Scratch.Name),
+		humanAge(now.Sub(deletedAt(r.Scratch))),
+		humanPurge(r.PurgeAt.Sub(now)),
+		tagsOrDash(r.Scratch.Tags),
+		humanSize(r.Scratch.Size),
+	}
+}
+
+func plainMorgueTable(w io.Writer, rows []MorgueRow, now time.Time) error {
+	var b strings.Builder
+	b.WriteString(strings.Join(morgueColumns, "\t"))
+	b.WriteByte('\n')
+	for _, r := range rows {
+		b.WriteString(strings.Join(morgueCells(r, now), "\t"))
+		b.WriteByte('\n')
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+func colorMorgueTable(w io.Writer, rows []MorgueRow, now time.Time) error {
+	pal := defaultPalette()
+
+	widths := make([]int, len(morgueColumns))
+	for i, h := range morgueColumns {
+		widths[i] = lipgloss.Width(h)
+	}
+	cells := make([][]string, len(rows))
+	doomed := make([]bool, len(rows))
+	for r, row := range rows {
+		cells[r] = morgueCells(row, now)
+		doomed[r] = !now.Before(row.PurgeAt) // past grace → eligible for reap
+		for c, val := range cells[r] {
+			if wdt := lipgloss.Width(val); wdt > widths[c] {
+				widths[c] = wdt
+			}
+		}
+	}
+
+	var b strings.Builder
+	headerCells := make([]string, len(morgueColumns))
+	for i, h := range morgueColumns {
+		headerCells[i] = pad(h, widths[i])
+	}
+	b.WriteString(pal.header.Render(strings.Join(headerCells, "  ")))
+	b.WriteByte('\n')
+
+	for r := range rows {
+		styled := make([]string, len(morgueColumns))
+		for c, val := range cells[r] {
+			styled[c] = pad(val, widths[c])
+		}
+		line := strings.Join(styled, "  ")
+		// Amber while there's grace left, red once past it.
+		style := pal.soon
+		if doomed[r] {
+			style = pal.expired
+		}
+		b.WriteString(style.Render(line))
+		b.WriteByte('\n')
+	}
+
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// deletedAt safely dereferences a scratch's DeletedAt, returning the zero time
+// for a (shouldn't-happen-here) live scratch so rendering never panics.
+func deletedAt(s index.Scratch) time.Time {
+	if s.DeletedAt == nil {
+		return time.Time{}
+	}
+	return *s.DeletedAt
+}
+
+// humanPurge renders time-until-hard-deletion, or "now" once a morgue item is
+// already past its grace window and eligible for reaping.
+func humanPurge(remaining time.Duration) string {
+	if remaining <= 0 {
+		return "now"
+	}
+	return "in " + humanAge(remaining)
 }

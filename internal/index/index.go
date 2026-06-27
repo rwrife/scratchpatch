@@ -60,7 +60,20 @@ type Scratch struct {
 	// Size is the content size in bytes at last write. 0 until content is
 	// written (M3+).
 	Size int64 `json:"size"`
+
+	// DeletedAt records when the scratch was soft-deleted into the morgue.
+	// A nil pointer means the scratch is live; a set value means it lives
+	// under morgue/ and is awaiting hard-deletion past the grace window
+	// (M5's reap). Kept as a pointer so live scratches omit it entirely
+	// rather than carrying a zero timestamp.
+	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 }
+
+// Live reports whether the scratch is in the live set (not soft-deleted).
+func (s Scratch) Live() bool { return s.DeletedAt == nil }
+
+// Morgued reports whether the scratch has been soft-deleted into the morgue.
+func (s Scratch) Morgued() bool { return s.DeletedAt != nil }
 
 // file is the serialized shape of index.json.
 type file struct {

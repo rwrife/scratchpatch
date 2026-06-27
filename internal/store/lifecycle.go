@@ -1,0 +1,257 @@
+// M4 lifecycle: the soft-delete safety net.
+//
+// This file adds the move operations that make scratchpatch's core promise —
+// "nothing is ever lost in one step" — real. `rm` moves a scratch's content
+// from scratches/ to morgue/ and stamps DeletedAt; `resurrect` moves it back
+// and clears the stamp. The index and the filesystem are kept in lockstep here
+// so callers never see a half-moved scratch.
+//
+// There is deliberately no hard-delete in this file. Purging content for good
+// is M5's `reap`, and only for morgue items already past the grace window.
+package store
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/rwrife/scratchpatch/internal/index"
+)
+
+// ErrAmbiguousID is returned when an id prefix matches more than one scratch.
+var ErrAmbiguousID = errors.New("ambiguous id prefix")
+
+// morguePath is the on-disk location for a soft-deleted scratch's content:
+// id.ext under morgue/. It mirrors contentPath so a move is a same-name rename
+// across the two directories.
+func (s *Store) morguePath(sc index.Scratch) string {
+	name := sc.ID
+	if sc.Ext != "" {
+		name += "." + sc.Ext
+	}
+	return filepath.Join(s.cfg.MorguePath(), name)
+}
+
+// LivePath returns where a scratch's content lives right now: morgue/ if it's
+// been soft-deleted, scratches/ otherwise. Commands that read or open a scratch
+// (cat/open) use this so they work whether or not the scratch is morgued.
+func (s *Store) LivePath(sc index.Scratch) string {
+	if sc.Morgued() {
+		return s.morguePath(sc)
+	}
+	return s.contentPath(sc)
+}
+
+// Resolve looks up a scratch by an exact id or an unambiguous id prefix, so
+// users don't have to type the full 8-char id. An exact match always wins; a
+// prefix that matches exactly one scratch resolves to it; a prefix matching
+// several returns ErrAmbiguousID; none returns index.ErrNotFound.
+func (s *Store) Resolve(ref string) (index.Scratch, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return index.Scratch{}, fmt.Errorf("%q: %w", ref, index.ErrNotFound)
+	}
+
+	// Fast path: an exact id hit is unambiguous by construction.
+	if sc, err := s.idx.Get(ref); err == nil {
+		return sc, nil
+	} else if !errors.Is(err, index.ErrNotFound) {
+		return index.Scratch{}, err
+	}
+
+	all, err := s.idx.List()
+	if err != nil {
+		return index.Scratch{}, err
+	}
+
+	var matches []index.Scratch
+	for _, sc := range all {
+		if strings.HasPrefix(sc.ID, ref) {
+			matches = append(matches, sc)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return index.Scratch{}, fmt.Errorf("%q: %w", ref, index.ErrNotFound)
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, len(matches))
+		for i, m := range matches {
+			ids[i] = m.ID
+		}
+		return index.Scratch{}, fmt.Errorf("%q matches %d scratches (%s): %w",
+			ref, len(matches), strings.Join(ids, ", "), ErrAmbiguousID)
+	}
+}
+
+// ListLive returns the live (non-morgued) scratches, newest-first.
+func (s *Store) ListLive() ([]index.Scratch, error) {
+	return s.listFiltered(func(sc index.Scratch) bool { return sc.Live() })
+}
+
+// ListMorgue returns the soft-deleted scratches, newest-first.
+func (s *Store) ListMorgue() ([]index.Scratch, error) {
+	return s.listFiltered(func(sc index.Scratch) bool { return sc.Morgued() })
+}
+
+func (s *Store) listFiltered(keep func(index.Scratch) bool) ([]index.Scratch, error) {
+	all, err := s.idx.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]index.Scratch, 0, len(all))
+	for _, sc := range all {
+		if keep(sc) {
+			out = append(out, sc)
+		}
+	}
+	return out, nil
+}
+
+// MoveToMorgue soft-deletes a scratch: it moves the content file from
+// scratches/ to morgue/ and stamps DeletedAt in the index. It is a no-op error
+// to morgue something already in the morgue. The filesystem move happens first;
+// only if that succeeds is the index updated, and the move is rolled back if
+// the index write fails — so the two never diverge.
+func (s *Store) MoveToMorgue(sc index.Scratch) (index.Scratch, error) {
+	if sc.Morgued() {
+		return index.Scratch{}, fmt.Errorf("scratch %s is already in the morgue", sc.ID)
+	}
+
+	from := s.contentPath(sc)
+	to := s.morguePath(sc)
+	if err := moveFile(from, to); err != nil {
+		return index.Scratch{}, fmt.Errorf("move scratch to morgue: %w", err)
+	}
+
+	now := time.Now()
+	sc.DeletedAt = &now
+	if err := s.idx.Put(sc); err != nil {
+		// Roll the content back to live so the store stays consistent.
+		_ = moveFile(to, from)
+		return index.Scratch{}, fmt.Errorf("record soft-delete: %w", err)
+	}
+	return sc, nil
+}
+
+// Resurrect restores a soft-deleted scratch: it moves the content back from
+// morgue/ to scratches/ and clears DeletedAt. Resurrecting a live scratch is an
+// error. Like MoveToMorgue, the index is only updated after a successful move,
+// and the move is rolled back if the index write fails.
+func (s *Store) Resurrect(sc index.Scratch) (index.Scratch, error) {
+	if !sc.Morgued() {
+		return index.Scratch{}, fmt.Errorf("scratch %s is not in the morgue", sc.ID)
+	}
+
+	from := s.morguePath(sc)
+	to := s.contentPath(sc)
+	if err := moveFile(from, to); err != nil {
+		return index.Scratch{}, fmt.Errorf("restore scratch from morgue: %w", err)
+	}
+
+	sc.DeletedAt = nil
+	if err := s.idx.Put(sc); err != nil {
+		_ = moveFile(to, from)
+		return index.Scratch{}, fmt.Errorf("record resurrect: %w", err)
+	}
+	return sc, nil
+}
+
+// PurgeAt returns when a morgued scratch becomes eligible for hard-deletion:
+// DeletedAt + the configured grace window. The bool is false for live scratches
+// (which have no purge deadline). M5's reap consumes this; ls --morgue renders
+// the remaining time.
+func (s *Store) PurgeAt(sc index.Scratch) (time.Time, bool) {
+	if sc.DeletedAt == nil {
+		return time.Time{}, false
+	}
+	return sc.DeletedAt.Add(s.cfg.Grace), true
+}
+
+// ReadContent returns the bytes of a scratch's content file, reading from
+// whichever directory currently holds it (live or morgue). A missing file
+// surfaces as an error so `sp cat` can report an orphaned index entry rather
+// than silently printing nothing.
+func (s *Store) ReadContent(sc index.Scratch) ([]byte, error) {
+	path := s.LivePath(sc)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read scratch %s content: %w", sc.ID, err)
+	}
+	return b, nil
+}
+
+// moveFile relocates src to dst. It tries an atomic rename first (the common
+// case: same filesystem) and falls back to a copy+remove when rename fails with
+// a cross-device error, so the store still works if scratches/ and morgue/ ever
+// straddle a mount boundary.
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !isCrossDevice(err) {
+		return err
+	}
+	return copyThenRemove(src, dst)
+}
+
+// isCrossDevice reports whether err is the EXDEV "invalid cross-device link"
+// error that rename returns when src and dst live on different filesystems.
+func isCrossDevice(err error) bool {
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		return errors.Is(le.Err, syscall.EXDEV)
+	}
+	return false
+}
+
+// copyThenRemove implements a non-atomic move: copy src to a temp file beside
+// dst, fsync, rename into place, then remove src. The temp+rename keeps dst
+// from ever appearing half-written.
+func copyThenRemove(src, dst string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".move-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err = io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = os.Chmod(tmpName, info.Mode().Perm()); err != nil {
+		return err
+	}
+	if err = os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}

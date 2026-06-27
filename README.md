@@ -25,8 +25,9 @@ sp resurrect <id>                    # changed your mind? pull it back
 
 ## What works today
 
-`sp new` and `sp ls` are implemented (M3); lifecycle and reaping commands are
-landing next.
+`sp new` and `sp ls` are implemented (M3), as is the full lifecycle —
+`sp cat`, `sp open`, `sp rm` (soft-delete), `sp resurrect`, and `sp ls --morgue`
+(M4). Automatic reaping (`sp reap`) lands next.
 
 ### `sp new [name]`
 
@@ -60,6 +61,51 @@ sp ls | cat      # piped/redirected output is plain, tab-separated (script-frien
 On a TTY, rows are color-coded by proximity to expiry — **green** = fresh,
 **amber** = expiring within 24h, **red** = expired. When stdout isn't a
 terminal, output is plain tab-separated text with no color codes.
+
+### `sp cat <id>` / `sp open <id>`
+
+Read or re-open a scratch. The `<id>` may be an **unambiguous prefix** — you
+rarely need to type the full 8-char id.
+
+```bash
+sp cat 1a2b           # print a scratch's contents to stdout
+sp open 1a2b          # re-open it in $EDITOR
+```
+
+- Both work on live scratches **and** ones sitting in the morgue.
+- If a prefix matches more than one scratch, you'll be told to add more
+  characters; if it matches none, you get a clear "no scratch matches" error.
+- As with `sp new`, `sp open` falls back to printing the path when `$EDITOR`
+  is unset — the scratch is never inaccessible.
+
+### `sp rm <id>` — soft-delete to the morgue
+
+Moves a scratch into the morgue. **This never destroys content** — it just
+relocates the file and stamps a deletion time. Restore it any time with
+`sp resurrect`.
+
+```bash
+sp rm 1a2b            # → moved to the morgue; printed restore hint
+```
+
+### `sp resurrect <id>` — bring it back
+
+Pulls a soft-deleted scratch back out of the morgue and into the live set.
+
+```bash
+sp resurrect 1a2b     # (alias: sp restore)
+```
+
+### `sp ls --morgue`
+
+Lists the morgue: id, name, when each was deleted, **time until purge**, tags,
+and size. Rows are tinted **amber** while there's grace left and **red** once
+they're eligible for hard-deletion (by a future `sp reap`).
+
+```bash
+sp ls --morgue            # what's in the morgue and how long it has left
+sp ls --morgue --no-color # plain, script-friendly
+```
 
 ## Install
 

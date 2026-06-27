@@ -8,8 +8,9 @@
 // place.
 //
 // M2 established the layout, the config/index wiring, and directory
-// bootstrapping. M3 adds content creation (`sp new`); soft-delete to morgue,
-// hard-delete, and resurrect arrive in M4/M5.
+// bootstrapping. M3 added content creation (`sp new`). M4 (in lifecycle.go)
+// adds soft-delete to the morgue, resurrect, and id-prefix resolution;
+// hard-delete past the grace window is M5's reap.
 package store
 
 import (

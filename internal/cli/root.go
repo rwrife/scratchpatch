@@ -1,8 +1,9 @@
 // Package cli wires up the scratchpatch command tree.
 //
-// M1 kept this tiny (root + `sp version`); M3 adds the core create/view loop
-// (`sp new`, `sp ls`). Lifecycle commands (cat/open/rm/resurrect/reap) arrive
-// in later milestones.
+// M1 kept this tiny (root + `sp version`); M3 added the core create/view loop
+// (`sp new`, `sp ls`). M4 fills in the lifecycle: `sp cat`, `sp open`, `sp rm`
+// (soft-delete to the morgue), and `sp resurrect`, plus `sp ls --morgue`.
+// `sp reap` (hard-delete past grace) arrives in M5.
 package cli
 
 import (
@@ -33,6 +34,10 @@ func NewRootCommand() *cobra.Command {
 		newVersionCommand(),
 		newNewCommand(),
 		newLsCommand(),
+		newCatCommand(),
+		newOpenCommand(),
+		newRmCommand(),
+		newResurrectCommand(),
 	)
 
 	return root

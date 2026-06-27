@@ -23,6 +23,44 @@ sp reap                              # sweep expired → morgue, purge old morgu
 sp resurrect <id>                    # changed your mind? pull it back
 ```
 
+## What works today
+
+`sp new` and `sp ls` are implemented (M3); lifecycle and reaping commands are
+landing next.
+
+### `sp new [name]`
+
+Creates a scratch in the store, records its metadata, and opens it in
+`$EDITOR`.
+
+```bash
+sp new                       # auto-named dated slug, e.g. scratch-2026-06-26-2041
+sp new bug-repro             # named scratch
+sp new api --ext json        # pick the extension (no leading dot)
+sp new todo --tag work --tag urgent   # --tag may be repeated
+sp new note --ttl 168h       # custom lifespan (Go duration; "7d"-style parsing arrives in M5)
+sp new draft --no-edit       # create it but don't open an editor
+```
+
+- With no name, a dated slug is generated for you.
+- If `$EDITOR` is unset, the scratch is still created and its path is printed —
+  nothing is lost.
+- Defaults: extension **md**, TTL **7d**.
+
+### `sp ls`
+
+Lists live scratches: id, name, age, time-to-expiry, tags, and size.
+
+```bash
+sp ls            # colorized table on a terminal
+sp ls --no-color # force plain output
+sp ls | cat      # piped/redirected output is plain, tab-separated (script-friendly)
+```
+
+On a TTY, rows are color-coded by proximity to expiry — **green** = fresh,
+**amber** = expiring within 24h, **red** = expired. When stdout isn't a
+terminal, output is plain tab-separated text with no color codes.
+
 ## Install
 
 No tagged release yet (`v0.1.0` is the target). Build from source — it's a single

@@ -25,9 +25,10 @@ sp resurrect <id>                    # changed your mind? pull it back
 
 ## What works today
 
-`sp new` and `sp ls` are implemented (M3), as is the full lifecycle —
+`sp new` and `sp ls` are implemented (M3); the full lifecycle —
 `sp cat`, `sp open`, `sp rm` (soft-delete), `sp resurrect`, and `sp ls --morgue`
-(M4). Automatic reaping (`sp reap`) lands next.
+(M4); and now **automatic reaping** — `sp reap`, with human-friendly TTLs and a
+`--dry-run` preview (M5).
 
 ### `sp new [name]`
 
@@ -39,7 +40,7 @@ sp new                       # auto-named dated slug, e.g. scratch-2026-06-26-20
 sp new bug-repro             # named scratch
 sp new api --ext json        # pick the extension (no leading dot)
 sp new todo --tag work --tag urgent   # --tag may be repeated
-sp new note --ttl 168h       # custom lifespan (Go duration; "7d"-style parsing arrives in M5)
+sp new note --ttl 7d         # human durations: s, m, h, d, w (e.g. 30m, 12h, 7d, 2w, 1w2d12h)
 sp new draft --no-edit       # create it but don't open an editor
 ```
 
@@ -100,12 +101,37 @@ sp resurrect 1a2b     # (alias: sp restore)
 
 Lists the morgue: id, name, when each was deleted, **time until purge**, tags,
 and size. Rows are tinted **amber** while there's grace left and **red** once
-they're eligible for hard-deletion (by a future `sp reap`).
+they're eligible for hard-deletion by `sp reap`.
 
 ```bash
 sp ls --morgue            # what's in the morgue and how long it has left
 sp ls --morgue --no-color # plain, script-friendly
 ```
+
+### `sp reap` — sweep expired, purge past-grace
+
+The reaper, and the one place scratchpatch ever destroys content. It runs two
+stages, in order, and **never does both to the same scratch in one run**:
+
+1. **Expired live scratches → morgue** (soft-delete). Their grace clock starts
+   *now*, so a scratch that expires today is swept today but not purged today.
+2. **Past-grace morgue items → gone** (hard-delete). Only morgue scratches that
+   have aged beyond the grace window (default **3d**) are removed for good.
+
+```bash
+sp reap --dry-run    # preview exactly what would move and what would die
+sp reap              # do it
+sp reap --no-color   # plain output
+```
+
+`--dry-run` changes nothing on disk or in the index — it just prints the plan,
+so you can see what's about to die before it does. Run `sp reap` from cron or a
+launchd job to keep the store tidy automatically (a `--install-cron` helper is
+on the backlog).
+
+Human durations everywhere a lifespan is accepted: `s`, `m`, `h`, `d`, `w`, and
+composites like `1w2d12h`. `sp new --ttl 7d` and `sp new --ttl 30m` both work;
+Go-style durations (`168h`, `1h30m`) are still accepted too.
 
 ## Install
 
@@ -143,7 +169,7 @@ $SCRATCHPATCH_HOME/            # default: ~/.local/share/scratchpatch
 
 ## Design rules
 
-- **Never destructive in one move.** `rm`/`reap` move to the morgue; only items past the grace period are ever hard-deleted.
+- **Never destructive in one move.** `rm`/`reap` move to the morgue; only items past the grace period are ever hard-deleted, and only by `sp reap`.
 - **No daemon.** Reaping is on-demand (or a cron snippet you opt into).
 - **Local only.** The store is plain files under your XDG dirs (`SCRATCHPATCH_HOME` to override).
 

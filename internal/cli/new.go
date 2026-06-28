@@ -12,11 +12,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rwrife/scratchpatch/internal/store"
+	"github.com/rwrife/scratchpatch/internal/ttl"
 )
 
 // newFlags holds the parsed `sp new` options.
 type newFlags struct {
-	ttl    time.Duration
+	ttl    string
 	ext    string
 	tags   []string
 	noEdit bool
@@ -46,10 +47,10 @@ func newNewCommand() *cobra.Command {
 		},
 	}
 
-	// --ttl takes a Go duration (e.g. 168h, 30m). Human "7d"-style parsing
-	// lands with the TTL engine in M5; until then the default is applied when
-	// the flag is omitted.
-	cmd.Flags().DurationVar(&f.ttl, "ttl", 0, "scratch lifespan as a Go duration (e.g. 168h); default 7d when omitted")
+	// --ttl accepts friendly human durations via the M5 ttl engine: 30m, 2h,
+	// 7d, 2w, or composites like 1w2d12h (Go-style 168h / 1h30m work too).
+	// Omitting it applies the configured default (7d).
+	cmd.Flags().StringVar(&f.ttl, "ttl", "", "scratch lifespan, e.g. 30m, 12h, 7d, 2w (default 7d)")
 	cmd.Flags().StringVar(&f.ext, "ext", "", "file extension without a leading dot (default md)")
 	cmd.Flags().StringArrayVar(&f.tags, "tag", nil, "tag to attach; may be repeated")
 	cmd.Flags().BoolVar(&f.noEdit, "no-edit", false, "create the scratch without opening $EDITOR")
@@ -63,6 +64,21 @@ func runNew(cmd *cobra.Command, name string, f newFlags) error {
 		return err
 	}
 
+	// Parse the human TTL up front so a bad value fails before we create
+	// anything. An empty flag means "use the configured default", which Create
+	// applies when it sees a zero duration.
+	var ttlDur time.Duration
+	if s := strings.TrimSpace(f.ttl); s != "" {
+		d, perr := ttl.Parse(s)
+		if perr != nil {
+			return fmt.Errorf("--ttl: %w", perr)
+		}
+		if d <= 0 {
+			return fmt.Errorf("--ttl: %q is not a positive duration", f.ttl)
+		}
+		ttlDur = d
+	}
+
 	if strings.TrimSpace(name) == "" {
 		name = generatedName(time.Now())
 	}
@@ -70,7 +86,7 @@ func runNew(cmd *cobra.Command, name string, f newFlags) error {
 	sc, path, err := st.Create(store.CreateOptions{
 		Name: name,
 		Ext:  f.ext,
-		TTL:  f.ttl,
+		TTL:  ttlDur,
 		Tags: f.tags,
 	})
 	if err != nil {

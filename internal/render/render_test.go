@@ -179,3 +179,101 @@ func TestTableSortsNewestFirst(t *testing.T) {
 		t.Errorf("expected newer row before older; got:\n%s", out)
 	}
 }
+
+// mkMorgued builds a soft-deleted scratch (DeletedAt set) plus its MorgueRow
+// with the given purge deadline.
+func mkMorgued(id, name string, created, deleted, purge time.Time, size int64) MorgueRow {
+	d := deleted
+	sc := index.Scratch{
+		ID:        id,
+		Name:      name,
+		CreatedAt: created,
+		Ext:       "txt",
+		Size:      size,
+		DeletedAt: &d,
+	}
+	return MorgueRow{Scratch: sc, PurgeAt: purge}
+}
+
+func TestMorgueTableEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	if err := MorgueTable(&buf, nil, time.Now(), false); err != nil {
+		t.Fatalf("MorgueTable: %v", err)
+	}
+	if !strings.Contains(buf.String(), "morgue is empty") {
+		t.Errorf("empty morgue table should say so; got %q", buf.String())
+	}
+}
+
+func TestMorgueTablePlainHasPurgeColumn(t *testing.T) {
+	now := time.Date(2026, 6, 26, 20, 0, 0, 0, time.UTC)
+	rows := []MorgueRow{
+		mkMorgued("dead1", "gone", now.Add(-50*time.Hour), now.Add(-2*time.Hour), now.Add(70*time.Hour), 2048),
+	}
+	var buf bytes.Buffer
+	if err := MorgueTable(&buf, rows, now, false); err != nil {
+		t.Fatalf("MorgueTable: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("plain morgue table must be colorless; got %q", out)
+	}
+	if !strings.Contains(out, "ID\tNAME\tDELETED\tPURGES\tTAGS\tSIZE") {
+		t.Errorf("morgue header missing/wrong; got %q", out)
+	}
+	if !strings.Contains(out, "in 2d") { // 70h until purge → "in 2d"
+		t.Errorf("expected time-until-purge cell; got %q", out)
+	}
+	if !strings.Contains(out, "gone") {
+		t.Errorf("expected scratch name; got %q", out)
+	}
+}
+
+func TestMorgueTablePurgePastShowsNow(t *testing.T) {
+	now := time.Date(2026, 6, 26, 20, 0, 0, 0, time.UTC)
+	// Purge deadline already passed → "now".
+	rows := []MorgueRow{
+		mkMorgued("dead2", "overdue", now.Add(-100*time.Hour), now.Add(-80*time.Hour), now.Add(-1*time.Hour), 1),
+	}
+	var buf bytes.Buffer
+	if err := MorgueTable(&buf, rows, now, false); err != nil {
+		t.Fatalf("MorgueTable: %v", err)
+	}
+	if !strings.Contains(buf.String(), "now") {
+		t.Errorf("past-grace item should show 'now'; got %q", buf.String())
+	}
+}
+
+func TestMorgueTableColorTintsByGrace(t *testing.T) {
+	restore := forceColorProfile()
+	defer restore()
+
+	now := time.Date(2026, 6, 26, 20, 0, 0, 0, time.UTC)
+	rows := []MorgueRow{
+		mkMorgued("d1", "soon", now.Add(-10*time.Hour), now.Add(-1*time.Hour), now.Add(24*time.Hour), 1), // grace left
+		mkMorgued("d2", "doom", now.Add(-10*time.Hour), now.Add(-5*time.Hour), now.Add(-1*time.Hour), 1), // past grace
+	}
+	var buf bytes.Buffer
+	if err := MorgueTable(&buf, rows, now, true); err != nil {
+		t.Fatalf("MorgueTable(color): %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("color morgue table should emit escape codes; got %q", buf.String())
+	}
+}
+
+func TestMorgueTableSortsNewestDeletedFirst(t *testing.T) {
+	now := time.Date(2026, 6, 26, 20, 0, 0, 0, time.UTC)
+	olderDel := mkMorgued("oldd", "older-del", now.Add(-50*time.Hour), now.Add(-10*time.Hour), now.Add(60*time.Hour), 1)
+	newerDel := mkMorgued("newd", "newer-del", now.Add(-50*time.Hour), now.Add(-1*time.Hour), now.Add(70*time.Hour), 1)
+	var buf bytes.Buffer
+	if err := MorgueTable(&buf, []MorgueRow{olderDel, newerDel}, now, false); err != nil {
+		t.Fatalf("MorgueTable: %v", err)
+	}
+	out := buf.String()
+	iNew := strings.Index(out, "newd")
+	iOld := strings.Index(out, "oldd")
+	if iNew < 0 || iOld < 0 || iNew > iOld {
+		t.Errorf("expected newer-deleted row first; got:\n%s", out)
+	}
+}

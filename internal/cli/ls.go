@@ -13,6 +13,7 @@ import (
 
 func newLsCommand() *cobra.Command {
 	var noColor bool
+	var morgue bool
 
 	cmd := &cobra.Command{
 		Use:   "ls",
@@ -21,33 +22,50 @@ func newLsCommand() *cobra.Command {
 			"expiry, tags, and size. On a terminal the rows are color-coded by how\n" +
 			"close each scratch is to expiry (green = fresh, amber = expiring soon,\n" +
 			"red = expired). When piped or redirected, output is plain tab-separated\n" +
-			"text with no color codes.",
+			"text with no color codes.\n\n" +
+			"Pass --morgue to list soft-deleted scratches instead, showing how long\n" +
+			"until each is purged for good.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLs(cmd, noColor)
+			return runLs(cmd, noColor, morgue)
 		},
 	}
 
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "force plain output even on a TTY")
+	cmd.Flags().BoolVar(&morgue, "morgue", false, "list soft-deleted scratches awaiting purge")
 
 	return cmd
 }
 
-func runLs(cmd *cobra.Command, noColor bool) error {
+func runLs(cmd *cobra.Command, noColor, morgue bool) error {
 	st, err := store.Open()
-	if err != nil {
-		return err
-	}
-
-	scratches, err := st.Index().List()
 	if err != nil {
 		return err
 	}
 
 	out := cmd.OutOrStdout()
 	color := !noColor && isTerminal(out)
+	now := time.Now()
 
-	return render.Table(out, scratches, time.Now(), color)
+	if morgue {
+		dead, err := st.ListMorgue()
+		if err != nil {
+			return err
+		}
+		rows := make([]render.MorgueRow, 0, len(dead))
+		for _, sc := range dead {
+			purgeAt, _ := st.PurgeAt(sc)
+			rows = append(rows, render.MorgueRow{Scratch: sc, PurgeAt: purgeAt})
+		}
+		return render.MorgueTable(out, rows, now, color)
+	}
+
+	scratches, err := st.ListLive()
+	if err != nil {
+		return err
+	}
+
+	return render.Table(out, scratches, now, color)
 }
 
 // isTerminal reports whether w is a character device (a TTY), which is our

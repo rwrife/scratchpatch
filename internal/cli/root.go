@@ -3,7 +3,8 @@
 // M1 kept this tiny (root + `sp version`); M3 added the core create/view loop
 // (`sp new`, `sp ls`). M4 fills in the lifecycle: `sp cat`, `sp open`, `sp rm`
 // (soft-delete to the morgue), and `sp resurrect`, plus `sp ls --morgue`.
-// `sp reap` (hard-delete past grace) arrives in M5.
+// M5 adds `sp reap`: sweep expired scratches to the morgue and hard-delete
+// morgue items past the grace window (with `--dry-run`).
 package cli
 
 import (
@@ -38,6 +39,7 @@ func NewRootCommand() *cobra.Command {
 		newOpenCommand(),
 		newRmCommand(),
 		newResurrectCommand(),
+		newReapCommand(),
 	)
 
 	return root

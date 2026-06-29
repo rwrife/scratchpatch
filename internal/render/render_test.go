@@ -277,3 +277,85 @@ func TestMorgueTableSortsNewestDeletedFirst(t *testing.T) {
 		t.Errorf("expected newer-deleted row first; got:\n%s", out)
 	}
 }
+
+func TestReapSummaryEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ReapSummary(&buf, ReapResult{}, false); err != nil {
+		t.Fatalf("ReapSummary: %v", err)
+	}
+	if !strings.Contains(buf.String(), "nothing to reap") {
+		t.Errorf("empty reap should say nothing to reap, got %q", buf.String())
+	}
+}
+
+func TestReapSummaryEmptyDryRun(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ReapSummary(&buf, ReapResult{DryRun: true}, false); err != nil {
+		t.Fatalf("ReapSummary: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "dry run") || !strings.Contains(out, "nothing to reap") {
+		t.Errorf("empty dry-run reap should announce both, got %q", out)
+	}
+}
+
+func TestReapSummaryListsSweptAndPurged(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	swept := mkScratch("sw01", "swept-one", now.Add(-time.Hour), now.Add(-time.Minute), nil, "md", 1)
+	purged := mkScratch("pu01", "purged-one", now.Add(-100*time.Hour), now.Add(-90*time.Hour), nil, "md", 1)
+
+	var buf bytes.Buffer
+	if err := ReapSummary(&buf, ReapResult{Swept: []index.Scratch{swept}, Purged: []index.Scratch{purged}}, false); err != nil {
+		t.Fatalf("ReapSummary: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"sw01", "swept-one", "pu01", "purged-one", "1 scratch", "morgue", "good"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reap summary missing %q, got:\n%s", want, out)
+		}
+	}
+	// Real reap uses past-tense / decisive wording, not conditional.
+	if strings.Contains(out, "would") || strings.Contains(out, "dry run") {
+		t.Errorf("a real reap must not use dry-run wording, got:\n%s", out)
+	}
+}
+
+func TestReapSummaryDryRunUsesConditionalWording(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	swept := mkScratch("sw01", "swept-one", now.Add(-time.Hour), now.Add(-time.Minute), nil, "md", 1)
+	var buf bytes.Buffer
+	if err := ReapSummary(&buf, ReapResult{Swept: []index.Scratch{swept}, DryRun: true}, false); err != nil {
+		t.Fatalf("ReapSummary: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "would sweep") || !strings.Contains(out, "nothing changed") {
+		t.Errorf("dry-run summary should use conditional wording, got:\n%s", out)
+	}
+}
+
+func TestReapSummaryPluralizes(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	a := mkScratch("aa01", "a", now, now.Add(-time.Minute), nil, "md", 1)
+	b := mkScratch("bb01", "b", now, now.Add(-time.Minute), nil, "md", 1)
+	var buf bytes.Buffer
+	if err := ReapSummary(&buf, ReapResult{Swept: []index.Scratch{a, b}}, false); err != nil {
+		t.Fatalf("ReapSummary: %v", err)
+	}
+	if !strings.Contains(buf.String(), "2 scratches") {
+		t.Errorf("two swept should pluralize, got:\n%s", buf.String())
+	}
+}
+
+func TestReapSummaryColorEmitsEscapes(t *testing.T) {
+	restore := forceColorProfile()
+	defer restore()
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	purged := mkScratch("pu01", "purged-one", now.Add(-100*time.Hour), now.Add(-90*time.Hour), nil, "md", 1)
+	var buf bytes.Buffer
+	if err := ReapSummary(&buf, ReapResult{Purged: []index.Scratch{purged}}, true); err != nil {
+		t.Fatalf("ReapSummary: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("colored reap summary should emit escape codes, got %q", buf.String())
+	}
+}

@@ -380,3 +380,98 @@ func humanPurge(remaining time.Duration) string {
 	}
 	return "in " + humanAge(remaining)
 }
+
+// ReapResult is the plain summary of a reap that ReapSummary renders. The store
+// computes it (which scratches were swept to the morgue, which were purged for
+// good) and render decides how to phrase and tint it — keeping the
+// render-knows-only-color boundary intact for M5's output too.
+type ReapResult struct {
+	// Swept are the expired live scratches moved into the morgue.
+	Swept []index.Scratch
+	// Purged are the past-grace morgue items hard-deleted for good.
+	Purged []index.Scratch
+	// DryRun flips the wording from past-tense ("swept") to conditional
+	// ("would sweep") so a preview can never be mistaken for the real thing.
+	DryRun bool
+}
+
+// ReapSummary writes a human summary of a reap to w. It leads with a one-line
+// headline, then lists each affected scratch under a "to the morgue" and a
+// "purged for good" section. On a TTY the headline and the purge section are
+// tinted (amber for sweeps, red for permanent deletions) to echo the table's
+// fresh→expired cue; otherwise it's plain text. A reap that did nothing prints a
+// single tidy line.
+func ReapSummary(w io.Writer, res ReapResult, color bool) error {
+	pal := defaultPalette()
+
+	verbSweep, verbPurge := "swept", "purged"
+	if res.DryRun {
+		verbSweep, verbPurge = "would sweep", "would purge"
+	}
+
+	if len(res.Swept) == 0 && len(res.Purged) == 0 {
+		msg := "nothing to reap — every scratch is either fresh or still within its grace window"
+		if res.DryRun {
+			msg = "dry run: " + msg
+		}
+		_, err := fmt.Fprintln(w, msg)
+		return err
+	}
+
+	var b strings.Builder
+
+	headline := fmt.Sprintf("reap: %s %s to the morgue, %s %s for good",
+		verbSweep, countScratches(len(res.Swept)),
+		verbPurge, countScratches(len(res.Purged)))
+	if res.DryRun {
+		headline = "dry run — " + headline + " (nothing changed)"
+	}
+	if color {
+		b.WriteString(pal.header.Render(headline))
+	} else {
+		b.WriteString(headline)
+	}
+	b.WriteByte('\n')
+
+	if len(res.Swept) > 0 {
+		fmt.Fprintf(&b, "\n%s expired → morgue:\n", arrow(res.DryRun))
+		writeReapLines(&b, res.Swept, color, pal.soon)
+	}
+	if len(res.Purged) > 0 {
+		fmt.Fprintf(&b, "\n%s past grace → gone:\n", arrow(res.DryRun))
+		writeReapLines(&b, res.Purged, color, pal.expired)
+	}
+
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// writeReapLines appends one indented "id  name" line per scratch, tinted with
+// style when color is set.
+func writeReapLines(b *strings.Builder, scs []index.Scratch, color bool, style lipgloss.Style) {
+	for _, sc := range scs {
+		line := "  " + sc.ID + "  " + nameOrDash(sc.Name)
+		if color {
+			line = style.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+}
+
+// arrow picks the bullet for a reap section: a tentative "?" feel for dry runs,
+// a decisive arrow for the real thing.
+func arrow(dryRun bool) string {
+	if dryRun {
+		return "·"
+	}
+	return "→"
+}
+
+// countScratches renders "N scratch(es)" with correct pluralization.
+func countScratches(n int) string {
+	if n == 1 {
+		return "1 scratch"
+	}
+	return fmt.Sprintf("%d scratches", n)
+}

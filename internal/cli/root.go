@@ -5,6 +5,8 @@
 // (soft-delete to the morgue), and `sp resurrect`, plus `sp ls --morgue`.
 // M5 adds `sp reap`: sweep expired scratches to the morgue and hard-delete
 // morgue items past the grace window (with `--dry-run`).
+// M6 begins the polish pass with `sp doctor`: a read-only store health check
+// that reconciles the index against what's actually on disk.
 package cli
 
 import (
@@ -40,6 +42,7 @@ func NewRootCommand() *cobra.Command {
 		newRmCommand(),
 		newResurrectCommand(),
 		newReapCommand(),
+		newDoctorCommand(),
 	)
 
 	return root

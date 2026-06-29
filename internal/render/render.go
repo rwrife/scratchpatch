@@ -475,3 +475,123 @@ func countScratches(n int) string {
 	}
 	return fmt.Sprintf("%d scratches", n)
 }
+
+// DoctorOrphan is a render-facing view of a content file with no index entry.
+// render takes these flattened structs rather than importing the store package,
+// keeping the dependency arrow pointing one way (cli/store → render, never
+// back).
+type DoctorOrphan struct {
+	Path string
+	Area string
+	Size int64
+}
+
+// DoctorMissing is a render-facing view of an index entry whose content file is
+// gone: the id/name to name it and where the content should have been.
+type DoctorMissing struct {
+	ID           string
+	Name         string
+	ExpectedPath string
+}
+
+// DoctorReportData is the plain summary `sp doctor` renders: the store's record
+// counts and footprint plus any drift between the index and the filesystem. The
+// store computes it; render decides wording and color, same as every other
+// command's output.
+type DoctorReportData struct {
+	LiveCount   int
+	MorgueCount int
+	TrackedSize int64
+	OrphanSize  int64
+	Orphans     []DoctorOrphan
+	Missing     []DoctorMissing
+}
+
+// healthy mirrors store.Diagnosis.Healthy on the flattened data so render can
+// pick its headline without the store type.
+func (d DoctorReportData) healthy() bool {
+	return len(d.Orphans) == 0 && len(d.Missing) == 0
+}
+
+// DoctorReport writes a store health report to w. It always leads with a counts
+// line (how many live/morgue scratches and the on-disk footprint), then — only
+// when there's drift — lists orphaned files (content with no index entry) and
+// missing content (index entries with no file), each in its own section. On a
+// TTY a clean bill of health is tinted green and problems amber/red, echoing
+// the tables' fresh→expired cue; otherwise it's plain text. The tone leans into
+// scratchpatch's tombstone humor without ever burying the actual finding.
+func DoctorReport(w io.Writer, d DoctorReportData, color bool) error {
+	pal := defaultPalette()
+	var b strings.Builder
+
+	// Headline: a clean store gets a reassuring (green) line; a drifting one
+	// gets an amber warning that names the totals.
+	if d.healthy() {
+		headline := fmt.Sprintf("the doctor is in — store is healthy: %s live, %s in the morgue, %s on disk",
+			countScratches(d.LiveCount), countScratches(d.MorgueCount), humanSize(d.totalSize()))
+		writeLine(&b, headline, color, pal.fresh)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+
+	headline := fmt.Sprintf("the doctor frowns — found %s and %s",
+		countOrphans(len(d.Orphans)), countMissing(len(d.Missing)))
+	writeLine(&b, headline, color, pal.header)
+
+	// Always show the footprint so the report is a complete checkup, not just
+	// the bad news.
+	writeLine(&b, fmt.Sprintf("store: %s live, %s in the morgue, %s on disk (%s wasted by orphans)",
+		countScratches(d.LiveCount), countScratches(d.MorgueCount),
+		humanSize(d.totalSize()), humanSize(d.OrphanSize)), color, pal.header)
+
+	if len(d.Orphans) > 0 {
+		fmt.Fprintf(&b, "\norphaned content (no index entry — bytes the store forgot):\n")
+		for _, o := range d.Orphans {
+			line := fmt.Sprintf("  %s  [%s]  %s", o.Path, o.Area, humanSize(o.Size))
+			writeLine(&b, line, color, pal.soon)
+		}
+	}
+
+	if len(d.Missing) > 0 {
+		fmt.Fprintf(&b, "\nmissing content (indexed but the file is gone — `sp cat`/`open` will fail):\n")
+		for _, m := range d.Missing {
+			line := fmt.Sprintf("  %s  %s  → %s", m.ID, nameOrDash(m.Name), m.ExpectedPath)
+			writeLine(&b, line, color, pal.expired)
+		}
+	}
+
+	// A gentle pointer at the safe next steps — doctor never acts on its own.
+	fmt.Fprintf(&b, "\ndoctor only diagnoses; nothing was changed. "+
+		"Resurrect what you want to keep, or remove stray files by hand.\n")
+
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// totalSize is the whole content footprint render reports: tracked + orphaned.
+func (d DoctorReportData) totalSize() int64 { return d.TrackedSize + d.OrphanSize }
+
+// writeLine appends s as its own line, tinted with style when color is set.
+func writeLine(b *strings.Builder, s string, color bool, style lipgloss.Style) {
+	if color {
+		s = style.Render(s)
+	}
+	b.WriteString(s)
+	b.WriteByte('\n')
+}
+
+// countOrphans / countMissing render their counts with correct pluralization,
+// matching countScratches' style so the report reads naturally for 0, 1, or N.
+func countOrphans(n int) string {
+	if n == 1 {
+		return "1 orphaned file"
+	}
+	return fmt.Sprintf("%d orphaned files", n)
+}
+
+func countMissing(n int) string {
+	if n == 1 {
+		return "1 missing file"
+	}
+	return fmt.Sprintf("%d missing files", n)
+}

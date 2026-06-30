@@ -20,6 +20,7 @@ sp new bug-repro --ttl 3d --ext py   # make a throwaway, open it in $EDITOR
 sp ls                                # see what's alive and when it expires
 sp reap --dry-run                    # preview what's about to die
 sp reap                              # sweep expired → morgue, purge old morgue items
+sp doctor                            # check store health (orphans, missing files, size)
 sp resurrect <id>                    # changed your mind? pull it back
 ```
 
@@ -27,8 +28,9 @@ sp resurrect <id>                    # changed your mind? pull it back
 
 `sp new` and `sp ls` are implemented (M3); the full lifecycle —
 `sp cat`, `sp open`, `sp rm` (soft-delete), `sp resurrect`, and `sp ls --morgue`
-(M4); and now **automatic reaping** — `sp reap`, with human-friendly TTLs and a
-`--dry-run` preview (M5).
+(M4); **automatic reaping** — `sp reap`, with human-friendly TTLs and a
+`--dry-run` preview (M5); and a read-only **`sp doctor`** store health check
+(M6, in progress).
 
 ### `sp new [name]`
 
@@ -132,6 +134,30 @@ on the backlog).
 Human durations everywhere a lifespan is accepted: `s`, `m`, `h`, `d`, `w`, and
 composites like `1w2d12h`. `sp new --ttl 7d` and `sp new --ttl 30m` both work;
 Go-style durations (`168h`, `1h30m`) are still accepted too.
+
+### `sp doctor` — store health check
+
+Gives the store a checkup by reconciling the index against what's actually on
+disk. It's **read-only** — it diagnoses, but never moves, deletes, or rewrites
+anything. It reports three things:
+
+- **orphaned content** — files in `scratches/` or `morgue/` with no index entry
+  (bytes the store forgot how to describe).
+- **missing content** — index entries whose file is gone, so `sp cat`/`sp open`
+  would fail on them.
+- **footprint** — how many live/morgue scratches you have and how much disk the
+  content occupies.
+
+```bash
+sp doctor            # colorized: green when healthy, amber/red when it finds drift
+sp doctor --no-color # plain, script-friendly
+sp doctor | cat      # piped output is plain text
+```
+
+A clean store prints a one-line bill of health. When `doctor` finds something,
+it lists each orphan and missing file and points you at the safe next steps
+(`sp resurrect` what you want to keep, or remove stray files by hand) — it won't
+tidy up on its own, in keeping with the never-destructive-by-surprise rule.
 
 ## Install
 

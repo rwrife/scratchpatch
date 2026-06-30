@@ -359,3 +359,134 @@ func TestReapSummaryColorEmitsEscapes(t *testing.T) {
 		t.Errorf("colored reap summary should emit escape codes, got %q", buf.String())
 	}
 }
+
+func TestDoctorReportHealthyIsReassuringAndColorless(t *testing.T) {
+	var buf bytes.Buffer
+	d := DoctorReportData{LiveCount: 2, MorgueCount: 1, TrackedSize: 2048}
+	if err := DoctorReport(&buf, d, false); err != nil {
+		t.Fatalf("DoctorReport: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "healthy") {
+		t.Errorf("healthy store should say so, got:\n%s", out)
+	}
+	if !strings.Contains(out, "2 scratches live") || !strings.Contains(out, "1 scratch in the morgue") {
+		t.Errorf("healthy report should carry counts, got:\n%s", out)
+	}
+	if !strings.Contains(out, "2.0KB") {
+		t.Errorf("healthy report should show footprint, got:\n%s", out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("plain report must not emit escapes, got %q", out)
+	}
+	// A clean checkup must not print the orphan/missing section headers.
+	if strings.Contains(out, "orphaned content") || strings.Contains(out, "missing content") {
+		t.Errorf("healthy report should have no problem sections, got:\n%s", out)
+	}
+}
+
+func TestDoctorReportListsOrphansAndMissing(t *testing.T) {
+	var buf bytes.Buffer
+	d := DoctorReportData{
+		LiveCount:   1,
+		MorgueCount: 0,
+		TrackedSize: 100,
+		OrphanSize:  26,
+		Orphans: []DoctorOrphan{
+			{Path: "/store/scratches/deadbeef.md", Area: "scratches", Size: 26},
+		},
+		Missing: []DoctorMissing{
+			{ID: "cafef00d", Name: "lost", ExpectedPath: "/store/scratches/cafef00d.md"},
+		},
+	}
+	if err := DoctorReport(&buf, d, false); err != nil {
+		t.Fatalf("DoctorReport: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"frowns",
+		"1 orphaned file",
+		"1 missing file",
+		"orphaned content",
+		"/store/scratches/deadbeef.md",
+		"[scratches]",
+		"missing content",
+		"cafef00d",
+		"lost",
+		"/store/scratches/cafef00d.md",
+		"nothing was changed", // doctor never acts on its own
+		"wasted by orphans",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report missing %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestDoctorReportMissingShowsDashForUnnamed(t *testing.T) {
+	var buf bytes.Buffer
+	d := DoctorReportData{
+		LiveCount: 1,
+		Missing:   []DoctorMissing{{ID: "abcd1234", Name: "", ExpectedPath: "/s/abcd1234.md"}},
+	}
+	if err := DoctorReport(&buf, d, false); err != nil {
+		t.Fatalf("DoctorReport: %v", err)
+	}
+	// nameOrDash should render an unnamed scratch as "-", not an empty gap.
+	if !strings.Contains(buf.String(), "abcd1234  -  ") {
+		t.Errorf("unnamed missing entry should show a dash, got:\n%s", buf.String())
+	}
+}
+
+func TestDoctorReportPluralizesCounts(t *testing.T) {
+	var buf bytes.Buffer
+	d := DoctorReportData{
+		Orphans: []DoctorOrphan{
+			{Path: "/s/a.md", Area: "scratches", Size: 1},
+			{Path: "/s/b.md", Area: "scratches", Size: 1},
+		},
+		Missing: []DoctorMissing{
+			{ID: "x1", ExpectedPath: "/s/x1.md"},
+			{ID: "x2", ExpectedPath: "/s/x2.md"},
+			{ID: "x3", ExpectedPath: "/s/x3.md"},
+		},
+	}
+	if err := DoctorReport(&buf, d, false); err != nil {
+		t.Fatalf("DoctorReport: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "2 orphaned files") {
+		t.Errorf("want plural orphans, got:\n%s", out)
+	}
+	if !strings.Contains(out, "3 missing files") {
+		t.Errorf("want plural missing, got:\n%s", out)
+	}
+}
+
+func TestDoctorReportColorEmitsEscapes(t *testing.T) {
+	restore := forceColorProfile()
+	defer restore()
+	var buf bytes.Buffer
+	d := DoctorReportData{
+		Orphans: []DoctorOrphan{{Path: "/s/deadbeef.md", Area: "scratches", Size: 9}},
+	}
+	if err := DoctorReport(&buf, d, true); err != nil {
+		t.Fatalf("DoctorReport: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("colored doctor report should emit escape codes, got %q", buf.String())
+	}
+}
+
+func TestDoctorReportHealthyColorEmitsEscapes(t *testing.T) {
+	restore := forceColorProfile()
+	defer restore()
+	var buf bytes.Buffer
+	if err := DoctorReport(&buf, DoctorReportData{LiveCount: 1}, true); err != nil {
+		t.Fatalf("DoctorReport: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("colored healthy report should still be tinted, got %q", buf.String())
+	}
+}

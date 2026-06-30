@@ -99,6 +99,18 @@ func Table(w io.Writer, scratches []index.Scratch, now time.Time, color bool) er
 	}
 
 	// Stable, newest-first order regardless of what the caller passed.
+	rows := sortLive(scratches)
+
+	if color {
+		return colorTable(w, rows, now)
+	}
+	return plainTable(w, rows, now)
+}
+
+// sortLive returns a copy of scratches in the canonical live ordering:
+// newest-created first, ties broken by id for determinism. Both the live table
+// and `--json` output go through here so their row order can never drift.
+func sortLive(scratches []index.Scratch) []index.Scratch {
 	rows := make([]index.Scratch, len(scratches))
 	copy(rows, scratches)
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -107,11 +119,7 @@ func Table(w io.Writer, scratches []index.Scratch, now time.Time, color bool) er
 		}
 		return rows[i].CreatedAt.After(rows[j].CreatedAt)
 	})
-
-	if color {
-		return colorTable(w, rows, now)
-	}
-	return plainTable(w, rows, now)
+	return rows
 }
 
 // rowCells builds the six display strings for a single scratch.
@@ -272,8 +280,20 @@ func MorgueTable(w io.Writer, rows []MorgueRow, now time.Time, color bool) error
 		return err
 	}
 
-	// Stable, newest-deleted-first ordering. Fall back to CreatedAt then id so
-	// the order is deterministic even if two share a delete time.
+	// Stable, newest-deleted-first ordering.
+	ordered := sortMorgue(rows)
+
+	if color {
+		return colorMorgueTable(w, ordered, now)
+	}
+	return plainMorgueTable(w, ordered, now)
+}
+
+// sortMorgue returns a copy of rows in the canonical morgue ordering:
+// most-recently-deleted first, then newest-created, then id — deterministic
+// even when two share a delete time. Shared by the morgue table and its
+// `--json` form so their order matches.
+func sortMorgue(rows []MorgueRow) []MorgueRow {
 	ordered := make([]MorgueRow, len(rows))
 	copy(ordered, rows)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -286,11 +306,7 @@ func MorgueTable(w io.Writer, rows []MorgueRow, now time.Time, color bool) error
 		}
 		return ordered[i].Scratch.ID < ordered[j].Scratch.ID
 	})
-
-	if color {
-		return colorMorgueTable(w, ordered, now)
-	}
-	return plainMorgueTable(w, ordered, now)
+	return ordered
 }
 
 // morgueCells builds the six display strings for a single morgue row.

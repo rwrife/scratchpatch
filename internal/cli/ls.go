@@ -14,6 +14,7 @@ import (
 func newLsCommand() *cobra.Command {
 	var noColor bool
 	var morgue bool
+	var asJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "ls",
@@ -24,27 +25,32 @@ func newLsCommand() *cobra.Command {
 			"red = expired). When piped or redirected, output is plain tab-separated\n" +
 			"text with no color codes.\n\n" +
 			"Pass --morgue to list soft-deleted scratches instead, showing how long\n" +
-			"until each is purged for good.",
+			"until each is purged for good.\n\n" +
+			"Pass --json for a stable, machine-readable array (no color, no flavor)\n" +
+			"suitable for scripting: `sp ls --json | jq '.[].id'`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLs(cmd, noColor, morgue)
+			return runLs(cmd, noColor, morgue, asJSON)
 		},
 	}
 
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "force plain output even on a TTY")
 	cmd.Flags().BoolVar(&morgue, "morgue", false, "list soft-deleted scratches awaiting purge")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a JSON array instead of a table (for scripting)")
 
 	return cmd
 }
 
-func runLs(cmd *cobra.Command, noColor, morgue bool) error {
+func runLs(cmd *cobra.Command, noColor, morgue, asJSON bool) error {
 	st, err := store.Open()
 	if err != nil {
 		return err
 	}
 
 	out := cmd.OutOrStdout()
-	color := !noColor && isTerminal(out)
+	// --json is intentionally color-free and personality-free; never tint it,
+	// regardless of TTY or --no-color.
+	color := !asJSON && !noColor && isTerminal(out)
 	now := time.Now()
 
 	if morgue {
@@ -57,6 +63,9 @@ func runLs(cmd *cobra.Command, noColor, morgue bool) error {
 			purgeAt, _ := st.PurgeAt(sc)
 			rows = append(rows, render.MorgueRow{Scratch: sc, PurgeAt: purgeAt})
 		}
+		if asJSON {
+			return render.MorgueTableJSON(out, rows, now)
+		}
 		return render.MorgueTable(out, rows, now, color)
 	}
 
@@ -65,6 +74,9 @@ func runLs(cmd *cobra.Command, noColor, morgue bool) error {
 		return err
 	}
 
+	if asJSON {
+		return render.TableJSON(out, scratches, now)
+	}
 	return render.Table(out, scratches, now, color)
 }
 

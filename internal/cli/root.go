@@ -6,7 +6,9 @@
 // M5 adds `sp reap`: sweep expired scratches to the morgue and hard-delete
 // morgue items past the grace window (with `--dry-run`).
 // M6 begins the polish pass with `sp doctor`: a read-only store health check
-// that reconciles the index against what's actually on disk.
+// that reconciles the index against what's actually on disk. M6 also adds
+// `--json` output to `sp ls` for scripting and `sp completion` to generate
+// bash/zsh/fish completion scripts.
 package cli
 
 import (
@@ -33,6 +35,11 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 
+	// We ship our own `sp completion` (completion.go) with scratchpatch-voiced
+	// help, so suppress cobra's auto-generated default to avoid two commands
+	// that do the same thing.
+	root.CompletionOptions.DisableDefaultCmd = true
+
 	root.AddCommand(
 		newVersionCommand(),
 		newNewCommand(),
@@ -43,6 +50,7 @@ func NewRootCommand() *cobra.Command {
 		newResurrectCommand(),
 		newReapCommand(),
 		newDoctorCommand(),
+		newCompletionCommand(),
 	)
 
 	return root

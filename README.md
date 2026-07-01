@@ -21,6 +21,8 @@ sp ls                                # see what's alive and when it expires
 sp reap --dry-run                    # preview what's about to die
 sp reap                              # sweep expired → morgue, purge old morgue items
 sp doctor                            # check store health (orphans, missing files, size)
+sp ls --json | jq '.[].id'           # machine-readable output for scripting
+sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp resurrect <id>                    # changed your mind? pull it back
 ```
 
@@ -30,7 +32,8 @@ sp resurrect <id>                    # changed your mind? pull it back
 `sp cat`, `sp open`, `sp rm` (soft-delete), `sp resurrect`, and `sp ls --morgue`
 (M4); **automatic reaping** — `sp reap`, with human-friendly TTLs and a
 `--dry-run` preview (M5); and a read-only **`sp doctor`** store health check
-(M6, in progress).
+plus scripting polish — **`sp ls --json`** and **`sp completion`** for
+bash/zsh/fish (M6, in progress).
 
 ### `sp new [name]`
 
@@ -59,11 +62,20 @@ Lists live scratches: id, name, age, time-to-expiry, tags, and size.
 sp ls            # colorized table on a terminal
 sp ls --no-color # force plain output
 sp ls | cat      # piped/redirected output is plain, tab-separated (script-friendly)
+sp ls --json     # stable JSON array for scripting (no color, no flavor)
 ```
 
 On a TTY, rows are color-coded by proximity to expiry — **green** = fresh,
 **amber** = expiring within 24h, **red** = expired. When stdout isn't a
 terminal, output is plain tab-separated text with no color codes.
+
+For scripting, `--json` emits a stable array of records — ids, names, tags,
+sizes, raw timestamps, plus pre-computed `ageHuman`, `expiresHuman`,
+`expiresInSeconds`, and a `status` of `fresh`/`soon`/`expired` (the same buckets
+the table tints). It works with `--morgue` too (`sp ls --morgue --json`), where
+it reports purge timing instead. The JSON path is always color- and
+personality-free, and an empty store emits `[]` rather than `null`, so
+`sp ls --json | jq` stays predictable.
 
 ### `sp cat <id>` / `sp open <id>`
 
@@ -158,6 +170,24 @@ A clean store prints a one-line bill of health. When `doctor` finds something,
 it lists each orphan and missing file and points you at the safe next steps
 (`sp resurrect` what you want to keep, or remove stray files by hand) — it won't
 tidy up on its own, in keeping with the never-destructive-by-surprise rule.
+
+### `sp completion <bash|zsh|fish>`
+
+Prints a shell completion script to stdout so `sp`'s commands and flags
+tab-complete. The output is plain text (no color, no flavor), safe to redirect
+straight into a file.
+
+```bash
+# bash
+source <(sp completion bash)
+sp completion bash > /etc/bash_completion.d/sp   # or persist it
+
+# zsh (ensure `autoload -U compinit && compinit` runs in your .zshrc)
+sp completion zsh > "${fpath[1]}/_sp"
+
+# fish
+sp completion fish > ~/.config/fish/completions/sp.fish
+```
 
 ## Install
 

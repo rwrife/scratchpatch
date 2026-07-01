@@ -20,6 +20,7 @@ sp new bug-repro --ttl 3d --ext py   # make a throwaway, open it in $EDITOR
 sp ls                                # see what's alive and when it expires
 sp reap --dry-run                    # preview what's about to die
 sp reap                              # sweep expired → morgue, purge old morgue items
+sp reap --install-cron               # print a daily-reap crontab line (no daemon)
 sp doctor                            # check store health (orphans, missing files, size)
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
@@ -139,9 +140,33 @@ sp reap --no-color   # plain output
 ```
 
 `--dry-run` changes nothing on disk or in the index — it just prints the plan,
-so you can see what's about to die before it does. Run `sp reap` from cron or a
-launchd job to keep the store tidy automatically (a `--install-cron` helper is
-on the backlog).
+so you can see what's about to die before it does.
+
+#### Automating it (no daemon, just a schedule)
+
+To stop remembering to run it, `sp reap --install-cron` prints a ready-to-use
+crontab line (a daily 03:00 sweep) plus an idempotent installer — re-running the
+installer replaces the line instead of stacking duplicates. scratchpatch never
+edits your crontab or runs a background process; it only prints what to run.
+
+```bash
+sp reap --install-cron              # print the crontab line + idempotent installer
+sp reap --install-cron --launchd    # macOS: emit a launchd LaunchAgent instead
+sp reap --uninstall-cron            # print how to remove the scheduled reap
+```
+
+Install it in one paste:
+
+```bash
+# adds exactly one scratchpatch line, even if run twice
+eval "$(sp reap --install-cron | sed -n 's/^  //p' | grep crontab)"
+```
+
+Or copy the printed crontab line yourself. On macOS, `--launchd` prints a
+`com.scratchpatch.reap.plist` to drop in `~/Library/LaunchAgents/` and the
+`launchctl load` command to activate it. Either way it just schedules the
+existing on-demand `sp reap` — consistent with scratchpatch's no-resident-daemon
+rule.
 
 Human durations everywhere a lifespan is accepted: `s`, `m`, `h`, `d`, `w`, and
 composites like `1w2d12h`. `sp new --ttl 7d` and `sp new --ttl 30m` both work;

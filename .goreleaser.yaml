@@ -1,0 +1,106 @@
+# GoReleaser configuration for scratchpatch.
+#
+# scratchpatch is a single static binary with no runtime dependencies, so the
+# release is deliberately boring: cross-compile `sp` for the common desktop
+# targets, tar/zip them up with the README, and publish to GitHub Releases with
+# a checksums file. No Docker images, no package repos — just grab-and-go
+# binaries, true to the "modern single-binary CLI" vibe in PLAN.md.
+#
+# Validate locally with `goreleaser check`; dry-run a build with
+# `goreleaser release --snapshot --clean` (produces artifacts in ./dist without
+# publishing or needing a tag).
+version: 2
+
+project_name: scratchpatch
+
+before:
+  hooks:
+    # Keep the module tidy and the tree buildable before we cut anything.
+    - go mod tidy
+    - go build ./...
+
+builds:
+  - id: sp
+    main: ./cmd/sp
+    binary: sp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Trim paths and drop the symbol table for a smaller binary; inject the
+    # version into the same var `sp version` already reads (see
+    # internal/cli/version.go). {{.Version}} is the tag with the leading "v"
+    # stripped, so we prefix it to match the vX.Y.Z convention.
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/rwrife/scratchpatch/internal/cli.Version=v{{ .Version }}
+
+archives:
+  - id: sp
+    builds:
+      - sp
+    # tar.gz everywhere except Windows, which gets a zip.
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    files:
+      - README.md
+      - PLAN.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  # Build the release notes from git history, grouped and de-noised. Chores and
+  # test-only commits don't belong in a user-facing changelog.
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: rwrife
+    name: scratchpatch
+  # v0.1.0 is the first cut; until then every build is a prerelease so nobody
+  # mistakes a snapshot for the real thing. GoReleaser auto-flags prereleases
+  # from the tag (e.g. -rc suffixes); "auto" keeps that behavior.
+  prerelease: auto
+  name_template: "scratchpatch {{ .Tag }}"
+  header: |
+    ## scratchpatch {{ .Tag }} 🪦
+
+    `git stash` for the throwaway files you were never going to commit anyway.
+
+    Grab the binary for your platform below, drop it on your `PATH`, and run
+    `sp --help`. Single static binary, no runtime dependencies.
+  footer: |
+    ---
+    See [`PLAN.md`](https://github.com/rwrife/scratchpatch/blob/main/PLAN.md) for
+    the roadmap. Found a rotting scratch we missed? Open an issue.

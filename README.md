@@ -216,8 +216,27 @@ sp completion fish > ~/.config/fish/completions/sp.fish
 
 ## Install
 
-No tagged release yet (`v0.1.0` is the target). Build from source — it's a single
-static binary with no runtime dependencies:
+### Prebuilt binaries (once `v0.1.0` ships)
+
+scratchpatch is a single static binary with no runtime dependencies. When a
+release is tagged, cross-platform binaries (Linux, macOS, Windows × x86_64 /
+arm64) are published to [**GitHub Releases**](https://github.com/rwrife/scratchpatch/releases)
+by [GoReleaser](https://goreleaser.com). Grab the archive for your platform,
+extract it, and drop `sp` anywhere on your `PATH`:
+
+```bash
+# example once artifacts exist — replace with the real version/URL
+tar -xzf scratchpatch_0.1.0_macos_arm64.tar.gz
+sudo mv sp /usr/local/bin/
+sp version      # scratchpatch v0.1.0 + tagline
+```
+
+Each release also ships a `checksums.txt` so you can verify what you downloaded.
+
+> No tagged release exists yet — `v0.1.0` is the target. Until then, build from
+> source.
+
+### From source
 
 ```bash
 git clone https://github.com/rwrife/scratchpatch
@@ -229,6 +248,18 @@ go build -o sp ./cmd/sp
 ```
 
 Requires Go 1.22+. Drop the `sp` binary anywhere on your `PATH`.
+
+### Maintainers: cutting a release
+
+Releases are tag-driven. Push a `vX.Y.Z` tag and the
+[`Release` workflow](./.github/workflows/release.yml) runs GoReleaser to build
+the binaries and publish the GitHub Release:
+
+```bash
+goreleaser check                         # validate .goreleaser.yaml
+goreleaser release --snapshot --clean    # dry-run into ./dist (no publish, no tag)
+git tag v0.1.0 && git push origin v0.1.0 # the real thing
+```
 
 ## Where things live
 

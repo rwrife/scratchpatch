@@ -25,6 +25,7 @@ sp doctor                            # check store health (orphans, missing file
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp resurrect <id>                    # changed your mind? pull it back
+sp promote <id>                      # the good ones: graduate a scratch into your repo
 ```
 
 ## What works today
@@ -34,7 +35,8 @@ sp resurrect <id>                    # changed your mind? pull it back
 (M4); **automatic reaping** — `sp reap`, with human-friendly TTLs and a
 `--dry-run` preview (M5); and a read-only **`sp doctor`** store health check
 plus scripting polish — **`sp ls --json`** and **`sp completion`** for
-bash/zsh/fish (M6, in progress).
+bash/zsh/fish, and **`sp promote`** to graduate a scratch into your repo
+(M6, in progress).
 
 ### `sp new [name]`
 
@@ -111,6 +113,30 @@ Pulls a soft-deleted scratch back out of the morgue and into the live set.
 ```bash
 sp resurrect 1a2b     # (alias: sp restore)
 ```
+
+### `sp promote <id> [dest]` — graduate a scratch into your repo
+
+Sometimes a throwaway turns out to matter. `sp promote` is the escape hatch:
+it moves the scratch's file out of the store and into your working tree, then
+drops it from the index — once promoted it's the repo's to keep, and the reaper
+can't touch it.
+
+```bash
+sp promote 1a2b                  # into the current dir, named from the scratch (e.g. bug-repro.py)
+sp promote 1a2b ./notes          # into a directory: ./notes/<slug>.<ext>
+sp promote 1a2b keep.md          # to an explicit path (renames on the way out)
+sp promote 1a2b keep.md --force  # overwrite an existing destination
+sp promote 1a2b --no-open        # don't open it in $EDITOR afterwards
+```
+
+- With no `dest`, the file lands in the current directory under a slug of the
+  scratch's name (its id when unnamed), keeping the original extension.
+- An existing-directory `dest` drops the file inside it; any other `dest` is the
+  full target path.
+- Promoting **never overwrites** an existing file without `--force`, and a
+  refused promote leaves the scratch untouched in the store.
+- After moving, the promoted file opens in `$EDITOR` (skip with `--no-open`);
+  a missing `$EDITOR` is not fatal — the move already happened.
 
 ### `sp ls --morgue`
 

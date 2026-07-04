@@ -137,3 +137,98 @@ func TestMorgueTableJSONPurgeFields(t *testing.T) {
 		t.Errorf("old1 purgeHuman = %q, want \"now\"", recs[1].PurgeHuman)
 	}
 }
+
+func TestDoctorReportJSONHealthyStore(t *testing.T) {
+	data := DoctorReportData{
+		LiveCount:   3,
+		MorgueCount: 1,
+		TrackedSize: 4096,
+	}
+
+	var buf bytes.Buffer
+	if err := DoctorReportJSON(&buf, data); err != nil {
+		t.Fatalf("DoctorReportJSON: %v", err)
+	}
+
+	// The JSON path is pure data: no color, no tombstone personality.
+	if bytes.Contains(buf.Bytes(), []byte("\x1b[")) {
+		t.Errorf("doctor --json must be colorless; got %q", buf.String())
+	}
+
+	var rec DoctorJSON
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("invalid JSON: %v (%q)", err, buf.String())
+	}
+
+	if !rec.Healthy {
+		t.Errorf("clean store should report healthy=true; got %+v", rec)
+	}
+	if rec.LiveCount != 3 || rec.MorgueCount != 1 {
+		t.Errorf("counts = live %d / morgue %d, want 3 / 1", rec.LiveCount, rec.MorgueCount)
+	}
+	if rec.TotalSize != 4096 {
+		t.Errorf("totalSize = %d, want 4096 (tracked only, no orphans)", rec.TotalSize)
+	}
+	// Slices are always arrays, never null, so scripts can iterate unconditionally.
+	if rec.Orphans == nil || len(rec.Orphans) != 0 {
+		t.Errorf("healthy store orphans should be empty non-nil array; got %#v", rec.Orphans)
+	}
+	if rec.Missing == nil || len(rec.Missing) != 0 {
+		t.Errorf("healthy store missing should be empty non-nil array; got %#v", rec.Missing)
+	}
+}
+
+func TestDoctorReportJSONReportsDrift(t *testing.T) {
+	data := DoctorReportData{
+		LiveCount:   2,
+		MorgueCount: 0,
+		TrackedSize: 1024,
+		OrphanSize:  512,
+		Orphans: []DoctorOrphan{
+			{Path: "/store/scratches/deadbeef.md", Area: "scratches", Size: 512},
+		},
+		Missing: []DoctorMissing{
+			{ID: "ab12cd", Name: "ghost", ExpectedPath: "/store/scratches/ab12cd.txt"},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := DoctorReportJSON(&buf, data); err != nil {
+		t.Fatalf("DoctorReportJSON: %v", err)
+	}
+
+	var rec DoctorJSON
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("invalid JSON: %v (%q)", err, buf.String())
+	}
+
+	if rec.Healthy {
+		t.Errorf("store with orphan + missing must report healthy=false")
+	}
+	// TotalSize denormalizes tracked + orphan so a script needn't add them.
+	if rec.TotalSize != 1536 {
+		t.Errorf("totalSize = %d, want 1536 (1024 tracked + 512 orphan)", rec.TotalSize)
+	}
+	if rec.OrphanSize != 512 {
+		t.Errorf("orphanSize = %d, want 512", rec.OrphanSize)
+	}
+
+	if len(rec.Orphans) != 1 {
+		t.Fatalf("expected 1 orphan, got %d", len(rec.Orphans))
+	}
+	o := rec.Orphans[0]
+	if o.Path != "/store/scratches/deadbeef.md" || o.Area != "scratches" || o.Size != 512 {
+		t.Errorf("orphan record = %+v, want path/area/size to match input", o)
+	}
+	if o.SizeHuman == "" {
+		t.Errorf("orphan should carry a human size string alongside raw bytes")
+	}
+
+	if len(rec.Missing) != 1 {
+		t.Fatalf("expected 1 missing, got %d", len(rec.Missing))
+	}
+	m := rec.Missing[0]
+	if m.ID != "ab12cd" || m.Name != "ghost" || m.ExpectedPath != "/store/scratches/ab12cd.txt" {
+		t.Errorf("missing record = %+v, want id/name/expectedPath to match input", m)
+	}
+}

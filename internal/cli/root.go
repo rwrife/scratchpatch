@@ -7,9 +7,10 @@
 // morgue items past the grace window (with `--dry-run`).
 // M6 begins the polish pass with `sp doctor`: a read-only store health check
 // that reconciles the index against what's actually on disk. M6 also adds
-// `--json` output to `sp ls` for scripting, `sp completion` to generate
-// bash/zsh/fish completion scripts, and `sp promote`: graduate a scratch out of
-// the store into the working tree so the good ones escape the reaper.
+// `--json` output to `sp ls` and `sp doctor` for scripting, `sp completion` to
+// generate bash/zsh/fish completion scripts, and `sp promote`: graduate a
+// scratch out of the store into the working tree so the good ones escape the
+// reaper.
 package cli
 
 import (

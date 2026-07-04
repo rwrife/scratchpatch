@@ -26,6 +26,10 @@ import (
 // ErrAmbiguousID is returned when an id prefix matches more than one scratch.
 var ErrAmbiguousID = errors.New("ambiguous id prefix")
 
+// ErrDestinationExists is returned by Promote when the target path already
+// exists and the caller didn't ask to overwrite it.
+var ErrDestinationExists = errors.New("destination already exists")
+
 // morguePath is the on-disk location for a soft-deleted scratch's content:
 // id.ext under morgue/. It mirrors contentPath so a move is a same-name rename
 // across the two directories.
@@ -161,6 +165,48 @@ func (s *Store) Resurrect(sc index.Scratch) (index.Scratch, error) {
 		return index.Scratch{}, fmt.Errorf("record resurrect: %w", err)
 	}
 	return sc, nil
+}
+
+// Promote graduates a scratch out of the store and into the wider filesystem:
+// it moves the content file from wherever it lives (scratches/ or morgue/) to
+// dst, then drops the scratch's index entry so the store no longer tracks it —
+// the promoted file is the destination's responsibility now.
+//
+// dst must be the final absolute (or caller-resolved) target file path; Promote
+// does not interpret directories or invent filenames, keeping this method a
+// thin, testable move+forget. It refuses to clobber an existing dst unless
+// overwrite is true. The filesystem move happens first; the index entry is only
+// removed after the content has safely landed, and the move is rolled back if
+// the index write fails — so a scratch is never lost between the two steps.
+func (s *Store) Promote(sc index.Scratch, dst string, overwrite bool) error {
+	if !overwrite {
+		if _, err := os.Lstat(dst); err == nil {
+			return fmt.Errorf("%w: %s", ErrDestinationExists, dst)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat destination %s: %w", dst, err)
+		}
+	}
+
+	// Make sure the destination directory exists so promoting into a nested
+	// path (e.g. notes/keep.md) works without the caller pre-creating it.
+	if dir := filepath.Dir(dst); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create destination dir %s: %w", dir, err)
+		}
+	}
+
+	from := s.LivePath(sc)
+	if err := moveFile(from, dst); err != nil {
+		return fmt.Errorf("move scratch out of the store: %w", err)
+	}
+
+	if err := s.idx.Delete(sc.ID); err != nil {
+		// Roll the content back to where it came from so the store stays
+		// consistent if we couldn't forget the metadata.
+		_ = moveFile(dst, from)
+		return fmt.Errorf("drop promoted scratch from index: %w", err)
+	}
+	return nil
 }
 
 // PurgeAt returns when a morgued scratch becomes eligible for hard-deletion:

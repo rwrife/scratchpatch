@@ -150,6 +150,93 @@ func tagsOrEmpty(tags []string) []string {
 	return tags
 }
 
+// DoctorJSON is the scriptable record for `sp doctor --json`: the store's
+// footprint and record counts plus any drift between the index and the
+// filesystem. It mirrors the human report's information without its wording or
+// color, so `sp doctor --json | jq '.healthy'` (or `.orphans`) stays a stable,
+// scriptable contract. Sizes carry both raw bytes and a human string, matching
+// the ls views, and the slices are always non-nil so the shape never flips to
+// null on a clean store.
+type DoctorJSON struct {
+	// Healthy is the one-field summary: true when there are no orphans and no
+	// missing content, so a script can gate on `.healthy` without inspecting the
+	// arrays.
+	Healthy bool `json:"healthy"`
+	// LiveCount and MorgueCount are how many index records are in each set.
+	LiveCount   int `json:"liveCount"`
+	MorgueCount int `json:"morgueCount"`
+	// TrackedSize is the bytes held by content that has an index entry;
+	// OrphanSize is the bytes held by orphaned files; TotalSize is their sum.
+	// Each carries a human companion so both scripts and eyeballs are served.
+	TrackedSize      int64  `json:"trackedSize"`
+	TrackedSizeHuman string `json:"trackedSizeHuman"`
+	OrphanSize       int64  `json:"orphanSize"`
+	OrphanSizeHuman  string `json:"orphanSizeHuman"`
+	TotalSize        int64  `json:"totalSize"`
+	TotalSizeHuman   string `json:"totalSizeHuman"`
+	// Orphans are content files with no index entry; Missing are index entries
+	// with no content file. Both mirror the human report's sections.
+	Orphans []DoctorOrphanJSON  `json:"orphans"`
+	Missing []DoctorMissingJSON `json:"missing"`
+}
+
+// DoctorOrphanJSON is the scriptable view of an orphaned content file: bytes on
+// disk the index has forgotten how to describe.
+type DoctorOrphanJSON struct {
+	Path      string `json:"path"`
+	Area      string `json:"area"`
+	Size      int64  `json:"size"`
+	SizeHuman string `json:"sizeHuman"`
+}
+
+// DoctorMissingJSON is the scriptable view of an index entry whose content file
+// is gone: the id/name to name it and where the content was expected.
+type DoctorMissingJSON struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ExpectedPath string `json:"expectedPath"`
+}
+
+// DoctorReportJSON writes a DoctorReportData to w as a single DoctorJSON object.
+// Like the ls JSON paths it is intentionally color- and personality-free: pure
+// data so `sp doctor --json` is a stable scripting contract. The orphan/missing
+// slices are always emitted as arrays (never null) so consumers can iterate
+// unconditionally, and ordering is inherited from the store's already-sorted
+// Diagnosis (orphans by path, missing by id).
+func DoctorReportJSON(w io.Writer, d DoctorReportData) error {
+	orphans := make([]DoctorOrphanJSON, 0, len(d.Orphans))
+	for _, o := range d.Orphans {
+		orphans = append(orphans, DoctorOrphanJSON{
+			Path:      o.Path,
+			Area:      o.Area,
+			Size:      o.Size,
+			SizeHuman: humanSize(o.Size),
+		})
+	}
+	missing := make([]DoctorMissingJSON, 0, len(d.Missing))
+	for _, m := range d.Missing {
+		missing = append(missing, DoctorMissingJSON{
+			ID:           m.ID,
+			Name:         m.Name,
+			ExpectedPath: m.ExpectedPath,
+		})
+	}
+	rec := DoctorJSON{
+		Healthy:          d.healthy(),
+		LiveCount:        d.LiveCount,
+		MorgueCount:      d.MorgueCount,
+		TrackedSize:      d.TrackedSize,
+		TrackedSizeHuman: humanSize(d.TrackedSize),
+		OrphanSize:       d.OrphanSize,
+		OrphanSizeHuman:  humanSize(d.OrphanSize),
+		TotalSize:        d.totalSize(),
+		TotalSizeHuman:   humanSize(d.totalSize()),
+		Orphans:          orphans,
+		Missing:          missing,
+	}
+	return writeJSON(w, rec)
+}
+
 // statusString maps a lifecycle bucket to its JSON status token.
 func statusString(l lifecycle) string {
 	switch l {

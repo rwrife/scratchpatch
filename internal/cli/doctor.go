@@ -9,6 +9,7 @@ import (
 
 func newDoctorCommand() *cobra.Command {
 	var noColor bool
+	var asJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "doctor",
@@ -22,19 +23,22 @@ func newDoctorCommand() *cobra.Command {
 			"  • footprint — how many live/morgue scratches you have and how much\n" +
 			"    disk the content occupies.\n\n" +
 			"doctor is read-only: it diagnoses but never moves or deletes anything.\n" +
-			"Use `sp resurrect` to keep something, or remove stray files by hand.",
+			"Use `sp resurrect` to keep something, or remove stray files by hand.\n\n" +
+			"Pass --json for a stable, machine-readable object (no color, no flavor)\n" +
+			"suitable for scripting: `sp doctor --json | jq '.healthy'`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctor(cmd, noColor)
+			return runDoctor(cmd, noColor, asJSON)
 		},
 	}
 
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "force plain output even on a TTY")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a JSON object instead of a report (for scripting)")
 
 	return cmd
 }
 
-func runDoctor(cmd *cobra.Command, noColor bool) error {
+func runDoctor(cmd *cobra.Command, noColor, asJSON bool) error {
 	st, err := store.Open()
 	if err != nil {
 		return err
@@ -46,9 +50,16 @@ func runDoctor(cmd *cobra.Command, noColor bool) error {
 	}
 
 	out := cmd.OutOrStdout()
-	color := !noColor && isTerminal(out)
+	data := toReportData(diag)
 
-	return render.DoctorReport(out, toReportData(diag), color)
+	// --json is intentionally color-free and personality-free; never tint it,
+	// regardless of TTY or --no-color, matching `sp ls --json`.
+	if asJSON {
+		return render.DoctorReportJSON(out, data)
+	}
+
+	color := !noColor && isTerminal(out)
+	return render.DoctorReport(out, data, color)
 }
 
 // toReportData flattens the store's Diagnosis into the render layer's plain

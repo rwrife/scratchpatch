@@ -22,6 +22,7 @@ sp reap --dry-run                    # preview what's about to die
 sp reap                              # sweep expired → morgue, purge old morgue items
 sp reap --install-cron               # print a daily-reap crontab line (no daemon)
 sp doctor                            # check store health (orphans, missing files, size)
+sp doctor --json | jq -e '.healthy'  # gate a script on store health
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp resurrect <id>                    # changed your mind? pull it back
@@ -34,9 +35,9 @@ sp promote <id>                      # the good ones: graduate a scratch into yo
 `sp cat`, `sp open`, `sp rm` (soft-delete), `sp resurrect`, and `sp ls --morgue`
 (M4); **automatic reaping** — `sp reap`, with human-friendly TTLs and a
 `--dry-run` preview (M5); and a read-only **`sp doctor`** store health check
-plus scripting polish — **`sp ls --json`** and **`sp completion`** for
-bash/zsh/fish, and **`sp promote`** to graduate a scratch into your repo
-(M6, in progress).
+plus scripting polish — **`sp ls --json`** / **`sp doctor --json`** and
+**`sp completion`** for bash/zsh/fish, and **`sp promote`** to graduate a scratch
+into your repo (M6, in progress).
 
 ### `sp new [name]`
 
@@ -215,12 +216,20 @@ anything. It reports three things:
 sp doctor            # colorized: green when healthy, amber/red when it finds drift
 sp doctor --no-color # plain, script-friendly
 sp doctor | cat      # piped output is plain text
+sp doctor --json     # stable JSON object for scripting (no color, no flavor)
 ```
 
 A clean store prints a one-line bill of health. When `doctor` finds something,
 it lists each orphan and missing file and points you at the safe next steps
 (`sp resurrect` what you want to keep, or remove stray files by hand) — it won't
 tidy up on its own, in keeping with the never-destructive-by-surprise rule.
+
+For scripting, `--json` emits a single stable object mirroring the report: a
+top-level `healthy` flag, the live/morgue counts, tracked/orphan/total sizes
+(raw bytes plus human strings), and `orphans`/`missing` arrays (always arrays,
+never null). Gate a script on the store's health without parsing prose:
+`sp doctor --json | jq -e '.healthy'`, or list drift with
+`sp doctor --json | jq '.orphans[].path'`.
 
 ### `sp completion <bash|zsh|fish>`
 

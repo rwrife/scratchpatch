@@ -7,7 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rwrife/scratchpatch/internal/index"
 	"github.com/rwrife/scratchpatch/internal/render"
+	"github.com/rwrife/scratchpatch/internal/secret"
 	"github.com/rwrife/scratchpatch/internal/store"
 )
 
@@ -26,6 +28,9 @@ func newLsCommand() *cobra.Command {
 			"text with no color codes.\n\n" +
 			"Pass --morgue to list soft-deleted scratches instead, showing how long\n" +
 			"until each is purged for good.\n\n" +
+			"A 🔑 next to a scratch's name means it tripped the secret tripwire — run\n" +
+			"`sp scan <id>` to see the masked findings. Such scratches can't be\n" +
+			"promoted into a repo without --allow-secrets.\n\n" +
 			"Pass --json for a stable, machine-readable array (no color, no flavor)\n" +
 			"suitable for scripting: `sp ls --json | jq '.[].id'`.",
 		Args: cobra.NoArgs,
@@ -74,10 +79,38 @@ func runLs(cmd *cobra.Command, noColor, morgue, asJSON bool) error {
 		return err
 	}
 
+	// Flag any live scratch that trips the secret tripwire so `sp ls` shows a
+	// 🔑 next to it (and --json carries "secret": true). Scanning is best-effort:
+	// a scratch whose content can't be read just goes unflagged rather than
+	// failing the whole listing.
+	markers := secretMarkers(st, scratches)
+
 	if asJSON {
-		return render.TableJSON(out, scratches, now)
+		return render.TableMarkedJSON(out, scratches, markers, now)
 	}
-	return render.Table(out, scratches, now, color)
+	return render.TableMarked(out, scratches, markers, now, color)
+}
+
+// secretMarkers scans each scratch's content and returns the set of ids that
+// tripped the secret tripwire, for `sp ls` to mark. It reads content directly
+// and swallows per-scratch read errors: a listing should never fail because one
+// file went missing, and doctor is the command that reports such drift. Returns
+// nil when nothing tripped so the render layer can skip marking entirely.
+func secretMarkers(st *store.Store, scratches []index.Scratch) map[string]bool {
+	var markers map[string]bool
+	for _, sc := range scratches {
+		content, err := st.ReadContent(sc)
+		if err != nil {
+			continue
+		}
+		if secret.Tripped(content) {
+			if markers == nil {
+				markers = make(map[string]bool)
+			}
+			markers[sc.ID] = true
+		}
+	}
+	return markers
 }
 
 // isTerminal reports whether w is a character device (a TTY), which is our

@@ -25,6 +25,7 @@ sp doctor                            # check store health (orphans, missing file
 sp doctor --json | jq -e '.healthy'  # gate a script on store health
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
+sp scan <id>                         # tripwire: does this scratch hold a secret?
 sp resurrect <id>                    # changed your mind? pull it back
 sp promote <id>                      # the good ones: graduate a scratch into your repo
 ```
@@ -34,10 +35,12 @@ sp promote <id>                      # the good ones: graduate a scratch into yo
 `sp new` and `sp ls` are implemented (M3); the full lifecycle —
 `sp cat`, `sp open`, `sp rm` (soft-delete), `sp resurrect`, and `sp ls --morgue`
 (M4); **automatic reaping** — `sp reap`, with human-friendly TTLs and a
-`--dry-run` preview (M5); and a read-only **`sp doctor`** store health check
-plus scripting polish — **`sp ls --json`** / **`sp doctor --json`** and
-**`sp completion`** for bash/zsh/fish, and **`sp promote`** to graduate a scratch
-into your repo (M6, in progress).
+`--dry-run` preview (M5); a read-only **`sp doctor`** store health check;
+scripting polish — **`sp ls --json`** / **`sp doctor --json`** and
+**`sp completion`** for bash/zsh/fish; **`sp promote`** to graduate a scratch
+into your repo; and a **secret tripwire** — **`sp scan`** flags scratches that
+look like they hold credentials, `sp ls` marks them with a 🔑, and `sp promote`
+refuses them unless you pass `--allow-secrets` (M6, in progress).
 
 ### `sp new [name]`
 
@@ -128,6 +131,7 @@ sp promote 1a2b ./notes          # into a directory: ./notes/<slug>.<ext>
 sp promote 1a2b keep.md          # to an explicit path (renames on the way out)
 sp promote 1a2b keep.md --force  # overwrite an existing destination
 sp promote 1a2b --no-open        # don't open it in $EDITOR afterwards
+sp promote 1a2b --allow-secrets  # promote even if the secret tripwire flags it
 ```
 
 - With no `dest`, the file lands in the current directory under a slug of the
@@ -136,6 +140,8 @@ sp promote 1a2b --no-open        # don't open it in $EDITOR afterwards
   full target path.
 - Promoting **never overwrites** an existing file without `--force`, and a
   refused promote leaves the scratch untouched in the store.
+- Promoting a scratch that trips the **secret tripwire** is refused unless you
+  pass `--allow-secrets` — run `sp scan <id>` to see the masked findings first.
 - After moving, the promoted file opens in `$EDITOR` (skip with `--no-open`);
   a missing `$EDITOR` is not fatal — the move already happened.
 
@@ -230,6 +236,47 @@ top-level `healthy` flag, the live/morgue counts, tracked/orphan/total sizes
 never null). Gate a script on the store's health without parsing prose:
 `sp doctor --json | jq -e '.healthy'`, or list drift with
 `sp doctor --json | jq '.orphans[].path'`.
+
+### `sp scan <id>` — the secret tripwire
+
+AI coding agents and tired humans leak API keys and `.env` dumps into throwaway
+files without thinking. `sp scan` runs a conservative heuristic detector over a
+single scratch and reports anything that looks like a credential — **with the
+values masked**. It never echoes a full secret back to your terminal.
+
+It catches:
+
+- **AWS access key ids** (`AKIA…`/`ASIA…` + the fixed-length tail),
+- **PEM private-key headers** (`-----BEGIN … PRIVATE KEY-----`),
+- **secret-looking assignments** — `API_KEY=`, `TOKEN=`, `SECRET=`,
+  `PASSWORD=` and friends with a non-placeholder value,
+- **long high-entropy tokens** that look generated (bearer tokens, opaque keys).
+
+The heuristics are deliberately conservative to avoid alarm fatigue: template
+values like `API_KEY=changeme`, `TOKEN=<your-token>`, and `${VAR}` references
+stay quiet, as do ordinary prose, long numbers, and URLs.
+
+```bash
+sp scan 1a2b            # report masked findings by line number
+sp scan 1a2b --no-color # plain, script-friendly
+sp scan 1a2b --json     # stable JSON object (no color, no flavor)
+sp scan 1a2b || echo blocked   # non-zero exit when secrets are found
+```
+
+A clean scratch prints a one-line bill of health and exits `0`. A tripped one
+lists each finding as `L<line>  <rule>  <masked>` and exits **non-zero**, so
+`sp scan` slots straight into pre-commit hooks and CI. The `--json` form carries
+a top-level `tripped` flag and a `findings` array (always an array, never null;
+each finding has `kind`, `line`, `rule`, and a `masked` preview — never the raw
+value): `sp scan 1a2b --json | jq -e '.tripped | not'`.
+
+The tripwire also shows up where it matters most:
+
+- **`sp ls`** puts a 🔑 next to any scratch that trips, and `sp ls --json` sets
+  `"secret": true` on it.
+- **`sp promote`** refuses to graduate a tripped scratch into your repo unless
+  you pass `--allow-secrets` — the last line of defense before a leaked key
+  lands somewhere it might get committed.
 
 ### `sp completion <bash|zsh|fish>`
 

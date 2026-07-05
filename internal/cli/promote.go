@@ -9,13 +9,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rwrife/scratchpatch/internal/index"
+	"github.com/rwrife/scratchpatch/internal/secret"
 	"github.com/rwrife/scratchpatch/internal/store"
 )
 
 // promoteFlags holds the parsed `sp promote` options.
 type promoteFlags struct {
-	force  bool
-	noOpen bool
+	force        bool
+	noOpen       bool
+	allowSecrets bool
 }
 
 func newPromoteCommand() *cobra.Command {
@@ -32,7 +34,11 @@ func newPromoteCommand() *cobra.Command {
 			"If [dest] is an existing directory the file is placed inside it under a\n" +
 			"slug of its name; otherwise [dest] is the full target path. Promoting\n" +
 			"never overwrites an existing file unless --force is given. The id may be\n" +
-			"an unambiguous prefix.",
+			"an unambiguous prefix.\n\n" +
+			"Before moving, promote runs the secret tripwire over the scratch and\n" +
+			"refuses to graduate one that looks like it holds a credential (API keys,\n" +
+			"private keys, `TOKEN=`/`SECRET=` assignments). Run `sp scan <id>` to see\n" +
+			"the masked findings, or pass --allow-secrets to promote it anyway.",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dest := ""
@@ -45,6 +51,7 @@ func newPromoteCommand() *cobra.Command {
 
 	cmd.Flags().BoolVar(&f.force, "force", false, "overwrite the destination if a file is already there")
 	cmd.Flags().BoolVar(&f.noOpen, "no-open", false, "don't open the promoted file in $EDITOR after moving")
+	cmd.Flags().BoolVar(&f.allowSecrets, "allow-secrets", false, "promote even if the scratch trips the secret tripwire")
 
 	return cmd
 }
@@ -57,6 +64,19 @@ func runPromote(cmd *cobra.Command, ref, dest string, f promoteFlags) error {
 	sc, err := resolve(st, ref)
 	if err != nil {
 		return err
+	}
+
+	// Secret tripwire: refuse to graduate a scratch that looks like it holds a
+	// credential into the working tree, unless the user explicitly overrides.
+	// This is the last line of defense before a leaked key lands in a repo where
+	// it might get committed. Checked before any move so a blocked promote
+	// changes nothing.
+	if !f.allowSecrets {
+		if blocked, serr := promoteSecretGuard(st, sc); serr != nil {
+			return serr
+		} else if blocked != nil {
+			return blocked
+		}
 	}
 
 	target, err := promoteTarget(sc, dest)
@@ -157,4 +177,32 @@ func promoteError(err error, target string) error {
 		return fmt.Errorf("%s already exists \u2014 pass --force to overwrite it", target)
 	}
 	return err
+}
+
+// promoteSecretGuard runs the secret tripwire over the scratch's content and,
+// if it trips, returns a blocking error explaining how to inspect (`sp scan`)
+// or override (--allow-secrets). A nil error and nil block mean the scratch is
+// clean (or its content couldn't be read as text, in which case we don't block
+// on a read error — promote itself will surface any real content problem). The
+// error deliberately names the finding count but not the secret values; use
+// `sp scan` to see the masked details.
+func promoteSecretGuard(st *store.Store, sc index.Scratch) (blocked error, err error) {
+	content, rerr := st.ReadContent(sc)
+	if rerr != nil {
+		// Don't turn a content-read problem into a secret block; let the actual
+		// promote path report it. Returning nil,nil means "not blocked here".
+		return nil, nil
+	}
+	findings := secret.Scan(content)
+	if len(findings) == 0 {
+		return nil, nil
+	}
+	n := "secret"
+	if len(findings) != 1 {
+		n = "secrets"
+	}
+	return fmt.Errorf(
+		"refusing to promote %s (%s): %d %s detected \u2014 run `sp scan %s` to see "+
+			"the (masked) findings, or pass --allow-secrets to promote anyway",
+		sc.ID, displayName(sc), len(findings), n, sc.ID), nil
 }

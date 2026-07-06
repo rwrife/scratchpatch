@@ -105,7 +105,7 @@ func runOpen(cmd *cobra.Command, ref string) error {
 		}
 	}
 
-	fmt.Fprintf(out, "opened scratch %s (%s)\n", sc.ID, displayName(sc))
+	fmt.Fprintf(out, "opened scratch %s (%s) — back on the slab\n", sc.ID, displayName(sc))
 	return nil
 }
 
@@ -140,7 +140,7 @@ func runRm(cmd *cobra.Command, ref string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"moved scratch %s (%s) to the morgue — restore with `sp resurrect %s`\n",
+		"buried scratch %s (%s) in the morgue — not gone, just resting; restore with `sp resurrect %s`\n",
 		sc.ID, displayName(sc), sc.ID)
 	return nil
 }
@@ -177,7 +177,7 @@ func runResurrect(cmd *cobra.Command, ref string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"resurrected scratch %s (%s) — it's live again\n", sc.ID, displayName(sc))
+		"resurrected scratch %s (%s) — it claws its way out of the morgue and is live again\n", sc.ID, displayName(sc))
 	return nil
 }
 

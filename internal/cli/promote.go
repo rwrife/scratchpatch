@@ -97,7 +97,7 @@ func runPromote(cmd *cobra.Command, ref, dest string, f promoteFlags) error {
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "promoted scratch %s (%s) \u2192 %s\n", sc.ID, displayName(sc), target)
+	fmt.Fprintf(out, "promoted scratch %s (%s) \u2192 %s \u2014 it escapes the reaper and joins the working tree\n", sc.ID, displayName(sc), target)
 
 	if !f.noOpen {
 		if oerr := openInEditor(cmd, target); oerr != nil {

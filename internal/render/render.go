@@ -93,6 +93,16 @@ func (p Palette) styleFor(l lifecycle) lipgloss.Style {
 // passed in (rather than read from the clock) so output is deterministic and
 // unit-testable.
 func Table(w io.Writer, scratches []index.Scratch, now time.Time, color bool) error {
+	return TableMarked(w, scratches, nil, now, color)
+}
+
+// TableMarked is Table with an optional per-scratch marker set: any id present
+// in markers is flagged in the NAME column (currently a key glyph for scratches
+// that tripped the secret tripwire). markers may be nil, in which case this is
+// exactly Table. Keeping the marker as a side map — rather than a field on
+// index.Scratch — preserves the "index is plain storage, render decides
+// presentation" boundary and keeps the store unaware of the tripwire.
+func TableMarked(w io.Writer, scratches []index.Scratch, markers map[string]bool, now time.Time, color bool) error {
 	if len(scratches) == 0 {
 		_, err := fmt.Fprintln(w, "no scratches yet — create one with `sp new`")
 		return err
@@ -102,9 +112,9 @@ func Table(w io.Writer, scratches []index.Scratch, now time.Time, color bool) er
 	rows := sortLive(scratches)
 
 	if color {
-		return colorTable(w, rows, now)
+		return colorTable(w, rows, markers, now)
 	}
-	return plainTable(w, rows, now)
+	return plainTable(w, rows, markers, now)
 }
 
 // sortLive returns a copy of scratches in the canonical live ordering:
@@ -122,11 +132,13 @@ func sortLive(scratches []index.Scratch) []index.Scratch {
 	return rows
 }
 
-// rowCells builds the six display strings for a single scratch.
-func rowCells(s index.Scratch, now time.Time) []string {
+// rowCells builds the six display strings for a single scratch. markers may be
+// nil; when it flags this scratch's id, the NAME cell is prefixed with a key
+// glyph so a tripwire hit is visible at a glance without adding a whole column.
+func rowCells(s index.Scratch, markers map[string]bool, now time.Time) []string {
 	return []string{
 		s.ID,
-		nameOrDash(s.Name),
+		markedName(s, markers),
 		humanAge(now.Sub(s.CreatedAt)),
 		humanExpiry(s.ExpiresAt.Sub(now)),
 		tagsOrDash(s.Tags),
@@ -134,13 +146,25 @@ func rowCells(s index.Scratch, now time.Time) []string {
 	}
 }
 
+// markedName renders the NAME cell, prefixing a key glyph when the scratch
+// tripped the secret tripwire (its id is in markers). The marker rides on the
+// name rather than in its own column so existing table widths and the
+// plain/JSON contracts stay stable for scratches that didn't trip.
+func markedName(s index.Scratch, markers map[string]bool) string {
+	name := nameOrDash(s.Name)
+	if markers[s.ID] {
+		return "🔑 " + name
+	}
+	return name
+}
+
 // plainTable writes a no-escape, tab-separated table suitable for pipes.
-func plainTable(w io.Writer, rows []index.Scratch, now time.Time) error {
+func plainTable(w io.Writer, rows []index.Scratch, markers map[string]bool, now time.Time) error {
 	var b strings.Builder
 	b.WriteString(strings.Join(columns, "\t"))
 	b.WriteByte('\n')
 	for _, s := range rows {
-		b.WriteString(strings.Join(rowCells(s, now), "\t"))
+		b.WriteString(strings.Join(rowCells(s, markers, now), "\t"))
 		b.WriteByte('\n')
 	}
 	_, err := io.WriteString(w, b.String())
@@ -148,7 +172,7 @@ func plainTable(w io.Writer, rows []index.Scratch, now time.Time) error {
 }
 
 // colorTable draws the lipgloss table, tinting each row by lifecycle.
-func colorTable(w io.Writer, rows []index.Scratch, now time.Time) error {
+func colorTable(w io.Writer, rows []index.Scratch, markers map[string]bool, now time.Time) error {
 	pal := defaultPalette()
 
 	// Compute column widths from the (untinted) cell content so styling
@@ -160,7 +184,7 @@ func colorTable(w io.Writer, rows []index.Scratch, now time.Time) error {
 	cells := make([][]string, len(rows))
 	lifes := make([]lifecycle, len(rows))
 	for r, s := range rows {
-		cells[r] = rowCells(s, now)
+		cells[r] = rowCells(s, markers, now)
 		lifes[r] = classify(s, now)
 		for c, val := range cells[r] {
 			if wdt := lipgloss.Width(val); wdt > widths[c] {

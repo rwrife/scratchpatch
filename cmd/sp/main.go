@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -11,6 +12,12 @@ import (
 
 func main() {
 	if err := cli.NewRootCommand().Execute(); err != nil {
+		// `sp scan` signals "secrets found" with a message-less sentinel so it
+		// can gate hooks/CI via exit code without a redundant stderr line — the
+		// scan report already said everything. Exit non-zero, but stay quiet.
+		if errors.Is(err, cli.ErrSecretsFound) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

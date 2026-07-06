@@ -41,6 +41,10 @@ type ScratchJSON struct {
 	// table's color buckets so a script can branch the same way the eye does.
 	Status    string `json:"status"`
 	OriginCwd string `json:"originCwd"`
+	// Secret is true when the scratch tripped the secret tripwire (the same
+	// signal the 🔑 marker shows in `sp ls`). Scripts can gate a bulk promote on
+	// `.[] | select(.secret)` without shelling out to `sp scan` per id.
+	Secret bool `json:"secret"`
 }
 
 // MorgueJSON is the scriptable record for a soft-deleted scratch under
@@ -67,8 +71,10 @@ type MorgueJSON struct {
 
 // scratchJSON builds a ScratchJSON view of a live scratch as of now. It reuses
 // the same humanizers and lifecycle classification the tables use, so the two
-// renderings can never disagree about age, expiry phrasing, or status.
-func scratchJSON(s index.Scratch, now time.Time) ScratchJSON {
+// renderings can never disagree about age, expiry phrasing, or status. secret
+// is threaded in from the caller's tripwire scan (the JSON layer stays pure and
+// does no scanning itself).
+func scratchJSON(s index.Scratch, now time.Time, secret bool) ScratchJSON {
 	return ScratchJSON{
 		ID:               s.ID,
 		Name:             s.Name,
@@ -83,6 +89,7 @@ func scratchJSON(s index.Scratch, now time.Time) ScratchJSON {
 		ExpiresHuman:     humanExpiry(s.ExpiresAt.Sub(now)),
 		Status:           statusString(classify(s, now)),
 		OriginCwd:        s.OriginCwd,
+		Secret:           secret,
 	}
 }
 
@@ -111,10 +118,18 @@ func morgueJSON(r MorgueRow, now time.Time) MorgueJSON {
 // than null, so consumers can always treat the output as an array. Unlike the
 // table, this path is intentionally color- and personality-free.
 func TableJSON(w io.Writer, scratches []index.Scratch, now time.Time) error {
+	return TableMarkedJSON(w, scratches, nil, now)
+}
+
+// TableMarkedJSON is TableJSON with an optional per-scratch tripwire marker set:
+// any id in markers gets "secret": true in its record. markers may be nil, in
+// which case every record reports secret=false. As with TableMarked, the marker
+// is a side map so the store/index never learn about the tripwire.
+func TableMarkedJSON(w io.Writer, scratches []index.Scratch, markers map[string]bool, now time.Time) error {
 	ordered := sortLive(scratches)
 	records := make([]ScratchJSON, 0, len(ordered))
 	for _, s := range ordered {
-		records = append(records, scratchJSON(s, now))
+		records = append(records, scratchJSON(s, now, markers[s.ID]))
 	}
 	return writeJSON(w, records)
 }

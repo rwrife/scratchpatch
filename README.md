@@ -84,7 +84,7 @@ it reports purge timing instead. The JSON path is always color- and
 personality-free, and an empty store emits `[]` rather than `null`, so
 `sp ls --json | jq` stays predictable.
 
-### `sp cat <id>` / `sp open <id>`
+### `sp cat <id>` / `sp open [id]`
 
 Read or re-open a scratch. The `<id>` may be an **unambiguous prefix** — you
 rarely need to type the full 8-char id.
@@ -92,6 +92,7 @@ rarely need to type the full 8-char id.
 ```bash
 sp cat 1a2b           # print a scratch's contents to stdout
 sp open 1a2b          # re-open it in $EDITOR
+sp open               # no id → interactive picker over live scratches
 ```
 
 - Both work on live scratches **and** ones sitting in the morgue.
@@ -99,6 +100,18 @@ sp open 1a2b          # re-open it in $EDITOR
   characters; if it matches none, you get a clear "no scratch matches" error.
 - As with `sp new`, `sp open` falls back to printing the path when `$EDITOR`
   is unset — the scratch is never inaccessible.
+
+**Interactive picker.** Run `sp open` with no id to choose from the live
+scratches without typing one out. Each row shows id, name, age, time-to-expiry,
+and tags; type to fuzzy-filter (subsequence match, so `tdo` finds `todo`), then
+pick:
+
+- If [`fzf`](https://github.com/junegunn/fzf) is on your `PATH`, it drives the
+  picker. Pass `--no-fzf` to force the built-in one instead.
+- Otherwise a built-in prompt lists the scratches: type to filter, enter a
+  number to choose, a blank line to take the top match, or `q` to cancel.
+- Piped / non-interactive input degrades to a one-shot numbered choice.
+- **Esc / Ctrl-C / `q` cancels cleanly** — nothing is opened or changed.
 
 ### `sp rm <id>` — soft-delete to the morgue
 

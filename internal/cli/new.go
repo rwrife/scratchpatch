@@ -109,8 +109,39 @@ func runNew(cmd *cobra.Command, name string, f newFlags) error {
 		}
 	}
 
-	fmt.Fprintf(out, "created scratch %s (%s)\n", sc.ID, sc.Name)
+	fmt.Fprintf(out, "created scratch %s (%s) — %s\n", sc.ID, sc.Name, lifespanNote(sc.ExpiresAt, time.Now()))
 	return nil
+}
+
+// lifespanNote renders a one-clause, tombstone-flavored reminder of when a
+// freshly created scratch is due to be swept. It's deliberately terse so the
+// confirmation line stays a single glanceable sentence, and it never fires for
+// a scratch with no expiry (belt-and-suspenders — new scratches always get
+// one). now is passed in so the wording is deterministic for tests.
+func lifespanNote(expiresAt, now time.Time) string {
+	if expiresAt.IsZero() {
+		return "it'll live in the store until you reap it"
+	}
+	return "living on borrowed time, " + humanCountdown(expiresAt.Sub(now))
+}
+
+// humanCountdown phrases a time-until-expiry span for prose ("expires in ~7d"),
+// or notes it's already due when the deadline has passed. It leans on the same
+// compact day/hour/minute feel as the ls table without importing render.
+func humanCountdown(d time.Duration) string {
+	if d <= 0 {
+		return "and already due for the reaper"
+	}
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("expires in ~%dd", int(d/(24*time.Hour)))
+	case d >= time.Hour:
+		return fmt.Sprintf("expires in ~%dh", int(d/time.Hour))
+	case d >= time.Minute:
+		return fmt.Sprintf("expires in ~%dm", int(d/time.Minute))
+	default:
+		return "expires within the minute"
+	}
 }
 
 // openInEditor launches $EDITOR on path, wiring it to the current stdio so an

@@ -107,7 +107,7 @@ relocates the file and stamps a deletion time. Restore it any time with
 `sp resurrect`.
 
 ```bash
-sp rm 1a2b            # → moved to the morgue; printed restore hint
+sp rm 1a2b            # → buried in the morgue (not gone, just resting); printed restore hint
 ```
 
 ### `sp resurrect <id>` — bring it back

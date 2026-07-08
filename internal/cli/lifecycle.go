@@ -3,10 +3,14 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/rwrife/scratchpatch/internal/index"
+	"github.com/rwrife/scratchpatch/internal/picker"
+	"github.com/rwrife/scratchpatch/internal/render"
 	"github.com/rwrife/scratchpatch/internal/store"
 )
 
@@ -62,18 +66,31 @@ func runCat(cmd *cobra.Command, ref string) error {
 }
 
 func newOpenCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "open <id>",
+	var noFzf bool
+
+	cmd := &cobra.Command{
+		Use:   "open [id]",
 		Short: "Re-open a scratch in $EDITOR",
 		Long: "Re-open an existing scratch in $EDITOR. The id may be an unambiguous\n" +
 			"prefix. A morgued scratch is opened in place in the morgue (resurrect\n" +
 			"it first if you want it back among the living). When $EDITOR is unset,\n" +
-			"the scratch's path is printed so you can open it yourself.",
-		Args: cobra.ExactArgs(1),
+			"the scratch's path is printed so you can open it yourself.\n\n" +
+			"Called with no id, `sp open` launches an interactive picker over the\n" +
+			"live scratches: type to fuzzy-filter, pick one, and it opens. If `fzf`\n" +
+			"is installed it drives the picker; otherwise a built-in numbered filter\n" +
+			"prompt is used. Piped or non-interactive input degrades to a one-shot\n" +
+			"numbered choice. Esc / Ctrl-C / q cancels without changing anything.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOpen(cmd, args[0])
+			if len(args) == 1 {
+				return runOpen(cmd, args[0])
+			}
+			return runOpenPicker(cmd, !noFzf)
 		},
 	}
+
+	cmd.Flags().BoolVar(&noFzf, "no-fzf", false, "use the built-in picker even when fzf is installed")
+	return cmd
 }
 
 func runOpen(cmd *cobra.Command, ref string) error {
@@ -85,7 +102,60 @@ func runOpen(cmd *cobra.Command, ref string) error {
 	if err != nil {
 		return err
 	}
+	return openScratch(cmd, st, sc)
+}
 
+// runOpenPicker handles `sp open` with no id: it gathers the live scratches,
+// lets the user pick one interactively, then opens the chosen scratch exactly
+// as an explicit id would. allowFzf mirrors the inverse of --no-fzf. An empty
+// store, or a user who cancels, is a clean no-op with a friendly line rather
+// than an error — backing out of a picker should never feel like a failure.
+func runOpenPicker(cmd *cobra.Command, allowFzf bool) error {
+	st, err := store.Open()
+	if err != nil {
+		return err
+	}
+
+	live, err := st.ListLive()
+	if err != nil {
+		return err
+	}
+	if len(live) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "no live scratches to open — create one with `sp new`")
+		return nil
+	}
+
+	now := time.Now()
+	cands := make([]picker.Candidate, 0, len(live))
+	for _, sc := range live {
+		cands = append(cands, picker.NewCandidate(sc, render.PickerLabel(sc, now)))
+	}
+
+	streams := picker.IO{
+		In:  cmd.InOrStdin(),
+		Out: cmd.OutOrStdout(),
+		Err: cmd.ErrOrStderr(),
+	}
+	opts := picker.SelectDefaults(stdinIsTerminal(cmd))
+	opts.AllowFzf = allowFzf
+
+	chosen, err := picker.Select(streams, cands, opts)
+	if err != nil {
+		if errors.Is(err, picker.ErrCanceled) {
+			fmt.Fprintln(cmd.OutOrStdout(), "nothing opened — the slab stays as it was.")
+			return nil
+		}
+		return err
+	}
+	return openScratch(cmd, st, chosen.Scratch)
+}
+
+// openScratch launches $EDITOR on a resolved scratch and prints the confirming
+// line, refreshing the recorded size for live scratches afterward. It's the
+// shared tail of both the id path (runOpen) and the picker path (runOpenPicker)
+// so a scratch opens identically however it was chosen, and $EDITOR is still
+// launched from exactly one place per command.
+func openScratch(cmd *cobra.Command, st *store.Store, sc index.Scratch) error {
 	path := st.LivePath(sc)
 	out := cmd.OutOrStdout()
 
@@ -107,6 +177,24 @@ func runOpen(cmd *cobra.Command, ref string) error {
 
 	fmt.Fprintf(out, "opened scratch %s (%s) — back on the slab\n", sc.ID, displayName(sc))
 	return nil
+}
+
+// stdinIsTerminal reports whether the command's input is an interactive
+// terminal, which the picker uses to decide between its interactive front-ends
+// (fzf / filter loop) and the one-shot numbered degradation. It mirrors ls.go's
+// isTerminal but inspects the input side; anything that isn't provably a
+// character device (pipes, files, the buffers tests use) is treated as
+// not-a-TTY so tests and scripts take the deterministic numbered path.
+func stdinIsTerminal(cmd *cobra.Command) bool {
+	f, ok := cmd.InOrStdin().(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func newRmCommand() *cobra.Command {

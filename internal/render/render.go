@@ -284,6 +284,27 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
+// PickerLabel renders a single scratch as a compact, fixed-shape line for the
+// interactive `sp open` picker (issue #10): id, name, age, time-to-expiry, and
+// tags, in that order, so a chooser sees everything the ls table shows without
+// a full grid. It is deliberately plain (no color): the picker front-ends —
+// including fzf — consume these as raw lines and match against them, so escape
+// codes would corrupt both the display and the filtering. now is passed in for
+// deterministic, testable output, matching the table renderers.
+//
+// The columns are space-padded to a stable width so a stack of labels lines up
+// in a numbered list. Keeping this in render preserves the boundary that only
+// render decides how a scratch is presented; the picker package supplies the
+// interaction, not the formatting.
+func PickerLabel(s index.Scratch, now time.Time) string {
+	id := s.ID
+	name := pad(nameOrDash(s.Name), 20)
+	age := pad(humanAge(now.Sub(s.CreatedAt)), 5)
+	expires := pad(humanExpiry(s.ExpiresAt.Sub(now)), 10)
+	tags := tagsOrDash(s.Tags)
+	return fmt.Sprintf("%s  %s  %s  %s  %s", id, name, age, expires, tags)
+}
+
 // MorgueRow pairs a soft-deleted scratch with the moment it becomes eligible
 // for hard-deletion. render takes this plain data (computed by the store/config
 // layer) rather than reaching for the grace window itself, keeping the "render

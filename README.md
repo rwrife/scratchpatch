@@ -311,25 +311,26 @@ sp completion fish > ~/.config/fish/completions/sp.fish
 
 ## Install
 
-### Prebuilt binaries (once `v0.1.0` ships)
+### Prebuilt binaries
 
-scratchpatch is a single static binary with no runtime dependencies. When a
-release is tagged, cross-platform binaries (Linux, macOS, Windows × x86_64 /
-arm64) are published to [**GitHub Releases**](https://github.com/rwrife/scratchpatch/releases)
-by [GoReleaser](https://goreleaser.com). Grab the archive for your platform,
+scratchpatch is a single static binary with no runtime dependencies.
+Cross-platform binaries (Linux, macOS, Windows × x86_64 / arm64) are published
+to [**GitHub Releases**](https://github.com/rwrife/scratchpatch/releases) by
+[GoReleaser](https://goreleaser.com). Grab the archive for your platform,
 extract it, and drop `sp` anywhere on your `PATH`:
 
 ```bash
-# example once artifacts exist — replace with the real version/URL
-tar -xzf scratchpatch_0.1.0_macos_arm64.tar.gz
+# macOS (Apple Silicon) — swap the platform/arch for yours; see the release page
+VER=0.1.0
+curl -sSL -O "https://github.com/rwrife/scratchpatch/releases/download/v${VER}/scratchpatch_${VER}_macos_arm64.tar.gz"
+tar -xzf "scratchpatch_${VER}_macos_arm64.tar.gz"
 sudo mv sp /usr/local/bin/
 sp version      # scratchpatch v0.1.0 + tagline
 ```
 
-Each release also ships a `checksums.txt` so you can verify what you downloaded.
-
-> No tagged release exists yet — `v0.1.0` is the target. Until then, build from
-> source.
+Archives follow `scratchpatch_<version>_<os>_<arch>` (`os` is `linux`, `macos`,
+or `windows`; `arch` is `x86_64` or `arm64`; Windows ships a `.zip`). Each
+release also ships a `checksums.txt` so you can verify what you downloaded.
 
 ### From source
 

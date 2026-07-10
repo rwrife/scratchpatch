@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -17,10 +18,14 @@ import (
 
 // newFlags holds the parsed `sp new` options.
 type newFlags struct {
-	ttl    string
-	ext    string
-	tags   []string
-	noEdit bool
+	ttl        string
+	ext        string
+	tags       []string
+	noEdit     bool
+	stdin      bool
+	content    string
+	fromFile   string
+	contentSet bool
 }
 
 // nonSlugChars matches runs of characters we don't want in an auto-generated
@@ -55,11 +60,77 @@ func newNewCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.tags, "tag", nil, "tag to attach; may be repeated")
 	cmd.Flags().BoolVar(&f.noEdit, "no-edit", false, "create the scratch without opening $EDITOR")
 
+	// Headless capture flags (issue #27): seed content programmatically instead
+	// of shelling out to $EDITOR. Any of these suppresses the editor so
+	// scratchpatch can act as a sink for piped output, generated snippets, or
+	// AI-agent temp files. Interactive `sp new` is unchanged when none are set.
+	cmd.Flags().BoolVar(&f.stdin, "stdin", false, "read scratch content from standard input (no $EDITOR)")
+	cmd.Flags().StringVar(&f.content, "content", "", "use this string as the scratch content (no $EDITOR)")
+	cmd.Flags().StringVar(&f.fromFile, "from-file", "", "seed the scratch from an existing file (no $EDITOR)")
+
+	cmd.PreRunE = func(c *cobra.Command, _ []string) error {
+		f.contentSet = c.Flags().Changed("content")
+		return nil
+	}
+
 	return cmd
+}
+
+// captureContent gathers headless content from --stdin/--content/--from-file.
+// It returns the bytes, whether a headless source was requested at all, and an
+// error for conflicting sources or read failures. Exactly one source may be
+// used per invocation; --content "" is a deliberate empty scratch.
+func captureContent(cmd *cobra.Command, f newFlags) (data []byte, headless bool, err error) {
+	sources := 0
+	if f.stdin {
+		sources++
+	}
+	if f.contentSet {
+		sources++
+	}
+	if strings.TrimSpace(f.fromFile) != "" {
+		sources++
+	}
+	if sources == 0 {
+		return nil, false, nil
+	}
+	if sources > 1 {
+		return nil, true, errors.New("choose only one of --stdin, --content, or --from-file")
+	}
+
+	switch {
+	case f.stdin:
+		in := cmd.InOrStdin()
+		// Guard against a hang when --stdin is used on a bare TTY with nothing
+		// piped in: refuse rather than block the terminal forever.
+		if file, ok := in.(*os.File); ok && isTerminal(file) {
+			return nil, true, errors.New("--stdin expects piped input; nothing is attached to stdin")
+		}
+		b, rerr := io.ReadAll(in)
+		if rerr != nil {
+			return nil, true, fmt.Errorf("read stdin: %w", rerr)
+		}
+		return b, true, nil
+	case f.contentSet:
+		return []byte(f.content), true, nil
+	default:
+		b, rerr := os.ReadFile(f.fromFile)
+		if rerr != nil {
+			return nil, true, fmt.Errorf("read --from-file: %w", rerr)
+		}
+		return b, true, nil
+	}
 }
 
 func runNew(cmd *cobra.Command, name string, f newFlags) error {
 	st, err := store.Open()
+	if err != nil {
+		return err
+	}
+
+	// Gather any headless content up front so a bad source (conflicting flags,
+	// unreadable file, TTY with no pipe) fails before we create a scratch.
+	captured, headless, err := captureContent(cmd, f)
 	if err != nil {
 		return err
 	}
@@ -94,6 +165,20 @@ func runNew(cmd *cobra.Command, name string, f newFlags) error {
 	}
 
 	out := cmd.OutOrStdout()
+
+	// Headless capture path (issue #27): seed content from stdin/--content/
+	// --from-file, skip $EDITOR entirely, and refresh size. Content is written
+	// to disk, so `sp ls`'s live secret scan flags piped-in credentials (🔑)
+	// and `sp promote` guards them, exactly like editor-created scratches.
+	if headless {
+		if touched, werr := st.WriteContent(sc, captured); werr == nil {
+			sc = touched
+		} else {
+			return werr
+		}
+		fmt.Fprintf(out, "created scratch %s (%s) — %s\n", sc.ID, sc.Name, lifespanNote(sc.ExpiresAt, time.Now()))
+		return nil
+	}
 
 	if !f.noEdit {
 		if err := openInEditor(cmd, path); err != nil {

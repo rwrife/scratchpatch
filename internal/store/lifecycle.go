@@ -233,6 +233,18 @@ func (s *Store) ReadContent(sc index.Scratch) ([]byte, error) {
 	return b, nil
 }
 
+// WriteContent overwrites a live scratch's content file with data and refreshes
+// the recorded size in the index. It writes to the live path (scratches/) and
+// is used by headless capture (`sp new --stdin`) to seed content without an
+// editor round-trip. The returned Scratch carries the updated size.
+func (s *Store) WriteContent(sc index.Scratch, data []byte) (index.Scratch, error) {
+	path := s.LivePath(sc)
+	if err := os.WriteFile(path, data, filePerm); err != nil {
+		return index.Scratch{}, fmt.Errorf("write scratch %s content: %w", sc.ID, err)
+	}
+	return s.Touch(sc.ID)
+}
+
 // moveFile relocates src to dst. It tries an atomic rename first (the common
 // case: same filesystem) and falls back to a copy+remove when rename fails with
 // a cross-device error, so the store still works if scratches/ and morgue/ ever

@@ -61,6 +61,34 @@ sp new draft --no-edit       # create it but don't open an editor
   nothing is lost.
 - Defaults: extension **md**, TTL **7d**.
 
+#### Headless capture (pipes, agents, generated output)
+
+The interactive editor is great for humans and useless in a pipeline. Seed a
+scratch's content directly and skip `$EDITOR` entirely — perfect for parking
+throwaway logs, API responses, or AI-agent temp output in the reaped store
+instead of littering your repo:
+
+```bash
+pytest -q 2>&1 | sp new failing-tests --stdin --tag ci   # capture from a pipe
+sp new note --stdin <<'EOF'                              # capture from a heredoc
+remember to revoke that token
+EOF
+curl -s https://api.example.com/thing | sp new resp --ext json --stdin
+sp new todo --content "ship the thing"                   # one-liner, no pipe
+sp new seed --from-file ./scratch.txt                    # seed from a file
+```
+
+- `--stdin`, `--content`, and `--from-file` each suppress `$EDITOR`. Pick
+  exactly one per invocation (combining them is an error).
+- All the usual flags apply: `--ttl`, `--ext`, `--tag`.
+- Output still leads with the stable `created scratch <id>` anchor, so scripts
+  and tests keep working.
+- Captured content is run through the **secret tripwire** just like
+  editor-created scratches, so `sp ls` shows the 🔑 marker and `sp promote`
+  guards a piped-in credential.
+- `--content ""` deliberately creates an empty scratch. `--stdin` on a bare TTY
+  with nothing piped in refuses rather than hanging.
+
 ### `sp ls`
 
 Lists live scratches: id, name, age, time-to-expiry, tags, and size.

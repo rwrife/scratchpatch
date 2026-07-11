@@ -26,6 +26,8 @@ sp doctor --json | jq -e '.healthy'  # gate a script on store health
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp scan <id>                         # tripwire: does this scratch hold a secret?
+sp dedup                             # report byte-identical scratches (read-only)
+sp dedup --collapse                  # send redundant copies to the morgue (morgue-first)
 sp resurrect <id>                    # changed your mind? pull it back
 sp promote <id>                      # the good ones: graduate a scratch into your repo
 ```
@@ -40,7 +42,9 @@ scripting polish — **`sp ls --json`** / **`sp doctor --json`** and
 **`sp completion`** for bash/zsh/fish; **`sp promote`** to graduate a scratch
 into your repo; and a **secret tripwire** — **`sp scan`** flags scratches that
 look like they hold credentials, `sp ls` marks them with a 🔑, and `sp promote`
-refuses them unless you pass `--allow-secrets` (M6, in progress).
+refuses them unless you pass `--allow-secrets`; and **content dedup** —
+**`sp dedup`** reports byte-identical scratches and `--collapse` sweeps the
+redundant copies to the morgue (M6, in progress).
 
 ### `sp new [name]`
 
@@ -318,6 +322,39 @@ The tripwire also shows up where it matters most:
 - **`sp promote`** refuses to graduate a tripped scratch into your repo unless
   you pass `--allow-secrets` — the last line of defense before a leaked key
   lands somewhere it might get committed.
+
+### `sp dedup` — find (and collapse) byte-identical scratches
+
+Throwaway files breed duplicates: the same log pasted three times, an agent
+re-capturing identical output on every run, the same snippet `sp new`'d across
+two projects. Each copy ages out separately and quietly wastes footprint.
+`sp dedup` hashes every **live** scratch's content (SHA-256), groups the
+byte-identical copies into clusters, and reports how much they cost — naming the
+oldest copy in each cluster as the **canonical** one to keep.
+
+This is a content-equality primitive, distinct from `sp doctor` (which
+reconciles index-vs-disk drift, not equality) and `sp reap` (TTL-based). Two
+scratches with different names, tags, or extensions but identical bytes are
+still duplicates.
+
+```bash
+sp dedup             # read-only report of duplicate clusters (canonical + wasted bytes)
+sp dedup --no-color  # plain, script-friendly
+sp dedup --json      # stable JSON object (no color, no flavor)
+sp dedup --collapse  # move the redundant copies to the morgue, keep the canonical
+```
+
+By default `sp dedup` is **strictly read-only** — it moves nothing. Pass
+`--collapse` to send the redundant copies to the morgue, keeping each cluster's
+canonical (oldest) member live. Like `sp rm`, collapse is **morgue-first and
+never hard-deletes**: collapsed copies are recoverable with `sp resurrect` until
+the reaper purges them past the grace window.
+
+A unique store prints a clean, one-line bill of health. The `--json` form
+carries a top-level `clean` flag plus `clusters` (always an array, never null;
+each cluster has its full `digest`, `wastedBytes`, and `members` with a
+`canonical` flag) and a `collapsed` object that is `null` until a `--collapse`
+run moves something: `sp dedup --json | jq -e '.clean'`.
 
 ### `sp completion <bash|zsh|fish>`
 

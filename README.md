@@ -28,6 +28,7 @@ sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp scan <id>                         # tripwire: does this scratch hold a secret?
 sp dedup                             # report byte-identical scratches (read-only)
 sp dedup --collapse                  # send redundant copies to the morgue (morgue-first)
+sp tui                               # browse and manage scratches full-screen
 sp resurrect <id>                    # changed your mind? pull it back
 sp promote <id>                      # the good ones: graduate a scratch into your repo
 ```
@@ -44,7 +45,8 @@ into your repo; and a **secret tripwire** — **`sp scan`** flags scratches that
 look like they hold credentials, `sp ls` marks them with a 🔑, and `sp promote`
 refuses them unless you pass `--allow-secrets`; and **content dedup** —
 **`sp dedup`** reports byte-identical scratches and `--collapse` sweeps the
-redundant copies to the morgue (M6, in progress).
+redundant copies to the morgue (M6, in progress); and an optional full-screen
+**`sp tui`** browser over the same store (v0.2).
 
 ### `sp new [name]`
 
@@ -373,6 +375,36 @@ sp completion zsh > "${fpath[1]}/_sp"
 # fish
 sp completion fish > ~/.config/fish/completions/sp.fish
 ```
+
+### `sp tui` — the full-screen browser
+
+When you'd rather point-and-act than pipe, `sp tui` opens an interactive,
+full-screen browser over the same store — no second source of truth, just a
+keyboard-driven shell over `sp ls`/`rm`/`resurrect`/`open`. Live scratches on
+the left (color-coded by expiry, 🔑 for anything the secret tripwire flagged),
+the selected scratch's content previewed on the right. Secret scratches are
+**never dumped** into the preview — you get a redaction notice pointing at
+`sp scan` instead.
+
+```bash
+sp tui   # needs an interactive terminal; scripts should use `sp ls --json`
+```
+
+Keybindings:
+
+- `↑`/`↓` (or `k`/`j`) — move the selection; `g`/`G` jump to top/bottom
+- `tab` (or `m`) — flip between the **live** and **morgue** panes
+- `/` — live filter by name, id, or tag; `esc` clears it, `enter` accepts
+- `o` / `enter` — open the selection in `$EDITOR` (suspends and restores the TUI)
+- `d` (or `x`) — soft-delete the selection to the morgue (live pane)
+- `r` — resurrect the selection (morgue pane)
+- `R` — reload both panes from disk
+- `q` / `esc` — quit and restore the terminal
+
+Every file-moving action (`d`, `r`) asks for a `y/N` confirmation, and — like
+the rest of scratchpatch — the TUI **never hard-deletes**: `rm` here is still
+just a move to the morgue. Not attached to a terminal? `sp tui` bows out with a
+clear pointer to `sp ls`.
 
 ## Install
 

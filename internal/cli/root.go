@@ -56,6 +56,7 @@ func NewRootCommand() *cobra.Command {
 		newDoctorCommand(),
 		newDedupCommand(),
 		newScanCommand(),
+		newTUICommand(),
 		newCompletionCommand(),
 	)
 

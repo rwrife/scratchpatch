@@ -23,6 +23,8 @@ sp reap                              # sweep expired → morgue, purge old morgu
 sp reap --install-cron               # print a daily-reap crontab line (no daemon)
 sp doctor                            # check store health (orphans, missing files, size)
 sp doctor --json | jq -e '.healthy'  # gate a script on store health
+sp stats                             # fun store metrics: footprint, oldest survivor, tags
+sp stats --json | jq '.totalBytes'   # bytes kept out of /tmp, for scripting
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp scan <id>                         # tripwire: does this scratch hold a secret?
@@ -283,6 +285,34 @@ top-level `healthy` flag, the live/morgue counts, tracked/orphan/total sizes
 never null). Gate a script on the store's health without parsing prose:
 `sp doctor --json | jq -e '.healthy'`, or list drift with
 `sp doctor --json | jq '.orphans[].path'`.
+
+### `sp stats` — fun store metrics
+
+Takes the store's pulse and prints the little numbers that make the whole scheme
+feel worth it. Like `doctor`, it's **read-only** and derives everything from the
+index — no new counters, nothing changed. It reports:
+
+- **living** — how many scratches you're keeping and the bytes they hold.
+- **oldest survivor** — the scratch that has dodged the reaper longest, and for
+  how long.
+- **morgue** — recoverable soft-deleted bytes, plus how many are already past
+  the grace window (one `sp reap` from gone).
+- **footprint** — total bytes that passed through the store instead of rotting
+  loose in `/tmp` (as far as the index can account for — v0.1 keeps no all-time
+  counters, so this is the current live + morgue footprint, honestly labeled).
+- **top tags** — your most-used labels, ranked.
+
+```bash
+sp stats             # colorized report with a little tombstone flavor
+sp stats --no-color  # plain, script-friendly
+sp stats --json      # stable JSON object for scripting (no color, no flavor)
+```
+
+An empty store gets a friendly zero-state, not a wall of zeros. For scripting,
+`--json` emits a single stable object: live/morgue counts, raw bytes plus human
+strings for each size, a `graceSeconds` field, an `oldest` sub-object (`null`
+when there are no live scratches), and a `tags` array (always an array, never
+null). Pull the headline number with `sp stats --json | jq '.totalBytes'`.
 
 ### `sp scan <id>` — the secret tripwire
 

@@ -30,6 +30,25 @@ var ErrAmbiguousID = errors.New("ambiguous id prefix")
 // exists and the caller didn't ask to overwrite it.
 var ErrDestinationExists = errors.New("destination already exists")
 
+// SetPin sets or clears the pinned flag on a scratch and persists the index,
+// returning the updated record. Pinning is metadata-only: it never touches
+// content or moves files, so it works on live and morgued scratches alike
+// (pinning a morgued scratch is harmless — reap only consults the flag on the
+// live set). Setting the flag to the value it already holds is a no-op write,
+// which keeps `sp pin` idempotent. The scratch is re-fetched by id rather than
+// trusting the passed-in copy so a stale caller can't clobber other fields.
+func (s *Store) SetPin(id string, pinned bool) (index.Scratch, error) {
+	sc, err := s.idx.Get(id)
+	if err != nil {
+		return index.Scratch{}, err
+	}
+	sc.Pinned = pinned
+	if err := s.idx.Put(sc); err != nil {
+		return index.Scratch{}, err
+	}
+	return sc, nil
+}
+
 // morguePath is the on-disk location for a soft-deleted scratch's content:
 // id.ext under morgue/. It mirrors contentPath so a move is a same-name rename
 // across the two directories.

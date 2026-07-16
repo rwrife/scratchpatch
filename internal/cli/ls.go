@@ -30,7 +30,8 @@ func newLsCommand() *cobra.Command {
 			"until each is purged for good.\n\n" +
 			"A 🔑 next to a scratch's name means it tripped the secret tripwire — run\n" +
 			"`sp scan <id>` to see the masked findings. Such scratches can't be\n" +
-			"promoted into a repo without --allow-secrets.\n\n" +
+			"promoted into a repo without --allow-secrets. A 📌 (PIN in plain output)\n" +
+			"means the scratch is pinned and exempt from `sp reap`.\n\n" +
 			"Pass --json for a stable, machine-readable array (no color, no flavor)\n" +
 			"suitable for scripting: `sp ls --json | jq '.[].id'`.",
 		Args: cobra.NoArgs,

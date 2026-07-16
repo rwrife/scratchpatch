@@ -135,10 +135,10 @@ func sortLive(scratches []index.Scratch) []index.Scratch {
 // rowCells builds the six display strings for a single scratch. markers may be
 // nil; when it flags this scratch's id, the NAME cell is prefixed with a key
 // glyph so a tripwire hit is visible at a glance without adding a whole column.
-func rowCells(s index.Scratch, markers map[string]bool, now time.Time) []string {
+func rowCells(s index.Scratch, markers map[string]bool, now time.Time, plain bool) []string {
 	return []string{
 		s.ID,
-		markedName(s, markers),
+		markedName(s, markers, plain),
 		humanAge(now.Sub(s.CreatedAt)),
 		humanExpiry(s.ExpiresAt.Sub(now)),
 		tagsOrDash(s.Tags),
@@ -146,14 +146,24 @@ func rowCells(s index.Scratch, markers map[string]bool, now time.Time) []string 
 	}
 }
 
-// markedName renders the NAME cell, prefixing a key glyph when the scratch
-// tripped the secret tripwire (its id is in markers). The marker rides on the
-// name rather than in its own column so existing table widths and the
-// plain/JSON contracts stay stable for scratches that didn't trip.
-func markedName(s index.Scratch, markers map[string]bool) string {
+// markedName renders the NAME cell, prefixing markers when the scratch tripped
+// the secret tripwire (its id is in markers) and/or is pinned. The secret key
+// glyph (🔑) shows in both TTY and plain output; the pin marker is a 📌 glyph
+// on a TTY and degrades to the ASCII token PIN in plain (piped) output so
+// `sp ls | awk` never has to cope with the wide rune. The markers ride on the
+// name rather than in their own columns so existing table widths and the
+// plain/JSON contracts stay stable for scratches that carry neither.
+func markedName(s index.Scratch, markers map[string]bool, plain bool) string {
 	name := nameOrDash(s.Name)
 	if markers[s.ID] {
-		return "🔑 " + name
+		name = "🔑 " + name
+	}
+	if s.Pinned {
+		if plain {
+			name = "PIN " + name
+		} else {
+			name = "📌 " + name
+		}
 	}
 	return name
 }
@@ -164,7 +174,7 @@ func plainTable(w io.Writer, rows []index.Scratch, markers map[string]bool, now 
 	b.WriteString(strings.Join(columns, "\t"))
 	b.WriteByte('\n')
 	for _, s := range rows {
-		b.WriteString(strings.Join(rowCells(s, markers, now), "\t"))
+		b.WriteString(strings.Join(rowCells(s, markers, now, true), "\t"))
 		b.WriteByte('\n')
 	}
 	_, err := io.WriteString(w, b.String())
@@ -184,7 +194,7 @@ func colorTable(w io.Writer, rows []index.Scratch, markers map[string]bool, now 
 	cells := make([][]string, len(rows))
 	lifes := make([]lifecycle, len(rows))
 	for r, s := range rows {
-		cells[r] = rowCells(s, markers, now)
+		cells[r] = rowCells(s, markers, now, false)
 		lifes[r] = classify(s, now)
 		for c, val := range cells[r] {
 			if wdt := lipgloss.Width(val); wdt > widths[c] {
@@ -454,6 +464,9 @@ type ReapResult struct {
 	// DryRun flips the wording from past-tense ("swept") to conditional
 	// ("would sweep") so a preview can never be mistaken for the real thing.
 	DryRun bool
+	// PinnedSkipped is how many expired live scratches reap left alone because
+	// they were pinned. Reported as a trailing note so the exemption is visible.
+	PinnedSkipped int
 }
 
 // ReapSummary writes a human summary of a reap to w. It leads with a one-line
@@ -474,6 +487,9 @@ func ReapSummary(w io.Writer, res ReapResult, color bool) error {
 		msg := "nothing to reap — every scratch is either fresh or still within its grace window"
 		if res.DryRun {
 			msg = "dry run: " + msg
+		}
+		if res.PinnedSkipped > 0 {
+			msg += fmt.Sprintf(" (spared %s by pin)", countPinned(res.PinnedSkipped))
 		}
 		_, err := fmt.Fprintln(w, msg)
 		return err
@@ -501,6 +517,11 @@ func ReapSummary(w io.Writer, res ReapResult, color bool) error {
 	if len(res.Purged) > 0 {
 		fmt.Fprintf(&b, "\n%s past grace → gone:\n", arrow(res.DryRun))
 		writeReapLines(&b, res.Purged, color, pal.expired)
+	}
+
+	if res.PinnedSkipped > 0 {
+		fmt.Fprintf(&b, "\nspared %s by pin — pinned scratches are exempt from the reaper.\n",
+			countPinned(res.PinnedSkipped))
 	}
 
 	_, err := io.WriteString(w, b.String())
@@ -535,6 +556,15 @@ func countScratches(n int) string {
 		return "1 scratch"
 	}
 	return fmt.Sprintf("%d scratches", n)
+}
+
+// countPinned renders "N pinned scratch(es)" with correct pluralization, for
+// the reap summary's exemption note.
+func countPinned(n int) string {
+	if n == 1 {
+		return "1 pinned scratch"
+	}
+	return fmt.Sprintf("%d pinned scratches", n)
 }
 
 // DoctorOrphan is a render-facing view of a content file with no index entry.

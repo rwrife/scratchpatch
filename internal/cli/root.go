@@ -55,6 +55,8 @@ func NewRootCommand() *cobra.Command {
 		newReapCommand(),
 		newDoctorCommand(),
 		newStatsCommand(),
+		newExportCommand(),
+		newImportCommand(),
 		newDedupCommand(),
 		newScanCommand(),
 		newTUICommand(),

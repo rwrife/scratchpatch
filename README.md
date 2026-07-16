@@ -25,6 +25,8 @@ sp doctor                            # check store health (orphans, missing file
 sp doctor --json | jq -e '.healthy'  # gate a script on store health
 sp stats                             # fun store metrics: footprint, oldest survivor, tags
 sp stats --json | jq '.totalBytes'   # bytes kept out of /tmp, for scripting
+sp export --out snap.tar.gz           # snapshot the whole store to a tarball
+sp import snap.tar.gz                 # restore it on another machine (merge)
 sp ls --json | jq '.[].id'           # machine-readable output for scripting
 sp completion zsh > "${fpath[1]}/_sp" # tab-completion for your shell
 sp scan <id>                         # tripwire: does this scratch hold a secret?
@@ -313,6 +315,37 @@ An empty store gets a friendly zero-state, not a wall of zeros. For scripting,
 strings for each size, a `graceSeconds` field, an `oldest` sub-object (`null`
 when there are no live scratches), and a `tags` array (always an array, never
 null). Pull the headline number with `sp stats --json | jq '.totalBytes'`.
+
+### `sp export` / `sp import` — move the store between machines
+
+The store is local files by design, but you probably have more than one machine.
+`export` snapshots the whole store into a single dependency-free `.tar.gz`
+(stdlib `archive/tar` + `compress/gzip` only); `import` restores it elsewhere.
+
+```bash
+sp export                              # scratchpatch-export-<timestamp>.tar.gz in cwd
+sp export --out snap.tar.gz            # write to a specific file
+sp export --include-morgue             # also archive soft-deleted scratches
+sp export --out - | ssh box 'sp import -'   # pipe straight to another machine
+
+sp import snap.tar.gz                   # merge (default): add, never clobber
+sp import - < snap.tar.gz               # read the tarball from stdin
+sp import snap.tar.gz --replace         # back up, then replace the whole store
+```
+
+By default only **live** scratches are exported; `--include-morgue` also bundles
+morgued ones (they land back in the morgue on import). Import has two modes:
+
+- **`--merge` (default)** — adds incoming scratches. On an id collision it keeps
+  your existing scratch and reports the incoming one as *skipped*; it never
+  overwrites content silently.
+- **`--replace`** — destructive, so it must be explicit. It first writes a
+  timestamped backup tarball next to the store root, *then* replaces the store
+  with the archive's contents, keeping the operation recoverable.
+
+Exports carry a self-describing manifest (not the raw index), so a round-trip —
+export → fresh store → import — reproduces each scratch's content and metadata
+(id, name, tags, timestamps, TTL) identically.
 
 ### `sp scan <id>` — the secret tripwire
 

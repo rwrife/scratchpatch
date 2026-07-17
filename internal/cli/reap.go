@@ -96,9 +96,10 @@ func runReap(cmd *cobra.Command, dryRun, noColor bool) error {
 	color := !noColor && isTerminal(out)
 
 	return render.ReapSummary(out, render.ReapResult{
-		Swept:  plan.Morgued,
-		Purged: plan.Purged,
-		DryRun: plan.DryRun,
+		Swept:         plan.Morgued,
+		Purged:        plan.Purged,
+		DryRun:        plan.DryRun,
+		PinnedSkipped: plan.PinnedSkipped,
 	}, color)
 }
 

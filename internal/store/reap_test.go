@@ -239,3 +239,84 @@ func ids(scs []index.Scratch) []string {
 	}
 	return out
 }
+
+// TestReapSkipsPinnedAndCountsThem verifies an expired but pinned scratch is
+// left live and tallied in PinnedSkipped rather than swept to the morgue.
+func TestReapSkipsPinnedAndCountsThem(t *testing.T) {
+	s, _ := OpenWith(testConfig(t))
+	// Two expired live scratches; pin one.
+	pinned := seedExpired(t, s, "keep-me", reapNow.Add(-time.Hour), "important\n")
+	seedExpired(t, s, "sweep-me", reapNow.Add(-time.Hour), "whatever\n")
+
+	if _, err := s.SetPin(pinned.ID, true); err != nil {
+		t.Fatalf("SetPin: %v", err)
+	}
+
+	plan, err := s.Reap(reapNow, false)
+	if err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if plan.PinnedSkipped != 1 {
+		t.Errorf("PinnedSkipped = %d, want 1", plan.PinnedSkipped)
+	}
+	if len(plan.Morgued) != 1 {
+		t.Fatalf("Morgued = %d, want 1", len(plan.Morgued))
+	}
+	if plan.Morgued[0].ID == pinned.ID {
+		t.Error("pinned scratch was swept to the morgue")
+	}
+
+	// The pinned scratch must still be live after the reap.
+	got, err := s.Index().Get(pinned.ID)
+	if err != nil {
+		t.Fatalf("Get pinned: %v", err)
+	}
+	if !got.Live() {
+		t.Error("pinned scratch should still be live")
+	}
+	if !got.Pinned {
+		t.Error("pinned flag should persist through reap")
+	}
+}
+
+// TestSetPinRoundTripsThroughIndex verifies pin state persists and unpins cleanly.
+func TestSetPinRoundTripsThroughIndex(t *testing.T) {
+	s, _ := OpenWith(testConfig(t))
+	sc := seed(t, s, "note", "body\n")
+
+	updated, err := s.SetPin(sc.ID, true)
+	if err != nil {
+		t.Fatalf("SetPin true: %v", err)
+	}
+	if !updated.Pinned {
+		t.Error("returned record should be pinned")
+	}
+	got, _ := s.Index().Get(sc.ID)
+	if !got.Pinned {
+		t.Error("pin should persist in the index")
+	}
+
+	if _, err := s.SetPin(sc.ID, false); err != nil {
+		t.Fatalf("SetPin false: %v", err)
+	}
+	got, _ = s.Index().Get(sc.ID)
+	if got.Pinned {
+		t.Error("unpin should clear the flag in the index")
+	}
+}
+
+// TestReapDryRunSkipsPinned verifies dry-run also exempts pinned scratches.
+func TestReapDryRunSkipsPinned(t *testing.T) {
+	s, _ := OpenWith(testConfig(t))
+	pinned := seedExpired(t, s, "keep", reapNow.Add(-time.Hour), "x\n")
+	if _, err := s.SetPin(pinned.ID, true); err != nil {
+		t.Fatalf("SetPin: %v", err)
+	}
+	plan, err := s.Reap(reapNow, true)
+	if err != nil {
+		t.Fatalf("Reap dry-run: %v", err)
+	}
+	if plan.PinnedSkipped != 1 || len(plan.Morgued) != 0 {
+		t.Errorf("dry-run: PinnedSkipped=%d Morgued=%d, want 1 and 0", plan.PinnedSkipped, len(plan.Morgued))
+	}
+}

@@ -61,6 +61,13 @@ type Scratch struct {
 	// written (M3+).
 	Size int64 `json:"size"`
 
+	// Pinned marks a scratch as exempt from reaping. A pinned live scratch is
+	// never swept to the morgue by `sp reap`, regardless of its expiry — a
+	// first-class way to keep a scratch without lying about its TTL. The field
+	// is omitempty so existing indexes (which predate pinning) stay
+	// byte-compatible: an absent key decodes to false.
+	Pinned bool `json:"pinned,omitempty"`
+
 	// DeletedAt records when the scratch was soft-deleted into the morgue.
 	// A nil pointer means the scratch is live; a set value means it lives
 	// under morgue/ and is awaiting hard-deletion past the grace window

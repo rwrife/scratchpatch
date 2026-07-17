@@ -34,6 +34,7 @@ sp dedup                             # report byte-identical scratches (read-onl
 sp dedup --collapse                  # send redundant copies to the morgue (morgue-first)
 sp tui                               # browse and manage scratches full-screen
 sp resurrect <id>                    # changed your mind? pull it back
+sp pin <id>                          # keep one: exempt it from the reaper
 sp promote <id>                      # the good ones: graduate a scratch into your repo
 ```
 
@@ -168,6 +169,23 @@ Pulls a soft-deleted scratch back out of the morgue and into the live set.
 ```bash
 sp resurrect 1a2b     # (alias: sp restore)
 ```
+
+### `sp pin <id>` / `sp unpin <id>` — exempt a scratch from reaping
+
+Sometimes a scratch matters more than its TTL implies, but it doesn't deserve
+the working tree yet (`sp promote`). Instead of lying about its lifespan with an
+absurd `--ttl 9999d`, **pin** it: a pinned scratch keeps its real TTL on paper
+but `sp reap` will never sweep it into the morgue while the pin is set.
+
+```bash
+sp pin 1a2b       # 📌 exempt from the reaper until you unpin
+sp unpin 1a2b     # clear the pin; normal TTL rules resume
+```
+
+Pinning is metadata only — it doesn't move the file or touch the TTL. Pinned
+scratches show a 📌 in `sp ls` (the ASCII token `PIN` in piped/`--json` output,
+where `--json` also carries `"pinned": true`), and `sp reap` (including
+`--dry-run`) reports how many scratches it spared for being pinned.
 
 ### `sp promote <id> [dest]` — graduate a scratch into your repo
 

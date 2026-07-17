@@ -45,6 +45,10 @@ type ScratchJSON struct {
 	// signal the 🔑 marker shows in `sp ls`). Scripts can gate a bulk promote on
 	// `.[] | select(.secret)` without shelling out to `sp scan` per id.
 	Secret bool `json:"secret"`
+	// Pinned is true when the scratch is exempt from reaping (the same signal
+	// the 📌 marker / PIN token shows in `sp ls`). Scripts can list what will
+	// survive the next reap with `.[] | select(.pinned)`.
+	Pinned bool `json:"pinned"`
 }
 
 // MorgueJSON is the scriptable record for a soft-deleted scratch under
@@ -90,6 +94,7 @@ func scratchJSON(s index.Scratch, now time.Time, secret bool) ScratchJSON {
 		Status:           statusString(classify(s, now)),
 		OriginCwd:        s.OriginCwd,
 		Secret:           secret,
+		Pinned:           s.Pinned,
 	}
 }
 

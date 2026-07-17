@@ -70,6 +70,11 @@ type ReapPlan struct {
 	// be) hard-deleted.
 	Purged []index.Scratch
 
+	// PinnedSkipped counts expired live scratches that reap left alone because
+	// they are pinned. They would otherwise have been swept to the morgue; the
+	// count lets the CLI report "skipped N pinned" so the exemption is visible.
+	PinnedSkipped int
+
 	// DryRun records whether this plan was computed without making changes.
 	DryRun bool
 }
@@ -105,9 +110,15 @@ func (s *Store) Reap(now time.Time, dryRun bool) (ReapPlan, error) {
 		return ReapPlan{}, err
 	}
 
-	// Stage 1: expired live scratches → morgue.
+	// Stage 1: expired live scratches → morgue. Pinned scratches are exempt:
+	// even when expired they stay live, and we tally them so the summary can
+	// report how many the pin spared.
 	for _, sc := range live {
 		if !isExpired(sc, now) {
+			continue
+		}
+		if sc.Pinned {
+			plan.PinnedSkipped++
 			continue
 		}
 		if dryRun {
